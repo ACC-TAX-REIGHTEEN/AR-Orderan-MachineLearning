@@ -34,7 +34,7 @@ def download_sheet(url, output_name):
 
 
 def main():
-    config = configparser.ConfigParser()
+    config = configparser.ConfigParser(allow_no_value=True)
     config_file = "config.conf"
 
     if not os.path.exists(config_file):
