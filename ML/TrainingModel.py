@@ -2,18 +2,12 @@ import os
 import re
 import pandas as pd
 from rapidfuzz import fuzz, process
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.neighbors import NearestNeighbors
 
 KODE_BARANG_KOTOR = [
-    r"\bIRC\b",
-    r"\bZN\b",
-    r"\bTT\b",
-    r"\bBD\b",
-    r"\bTL\b",
-    r"\bMC\b",
-    r"\bTC\b",
-    r"\bFL\b",
-    r"\bSL\b",
-    r"\bHD\b",
+    r"\bIRC\b", r"\bZN\b", r"\bTT\b", r"\bBD\b", r"\bTL\b",
+    r"\bMC\b", r"\bTC\b", r"\bFL\b", r"\bSL\b", r"\bHD\b",
 ]
 
 
@@ -34,9 +28,11 @@ def bersihkan_teks_input(teks):
     return " ".join(teks_clean.split())
 
 
-def proses_pencocokan_historis_cerdas(
+def proses_pencocokan_hybrid(
     file_input="TheTrainningData.xlsx",
     file_output="Hasil_Latihan.xlsx",
+    batas_minimal_fuzzy=75.0,  # Batas skor minimal RapidFuzz (0 - 100)
+    batas_minimal_ml=0.65       # Batas skor minimal ML Cosine Similarity (0.0 - 1.0)
 ):
     print(f"--> Membaca file input: '{file_input}' ...")
 
@@ -53,6 +49,8 @@ def proses_pencocokan_historis_cerdas(
     col_f3 = "Ekstrak_Customer_Detail (F3)"
 
     memori_input_ke_master = {}
+    data_input_clean = []
+    data_target_master = []
 
     for _, row in df.iterrows():
         input_clean = bersihkan_teks_input(row[col_input])
@@ -67,19 +65,29 @@ def proses_pencocokan_historis_cerdas(
         if target_resmi and input_clean:
             master_clean = bersihkan_nama_rekomendasi(target_resmi)
             memori_input_ke_master[input_clean] = master_clean
+            data_input_clean.append(input_clean)
+            data_target_master.append(master_clean)
 
     daftar_input_historis = list(memori_input_ke_master.keys())
 
-    print(
-        f"--> Berhasil mempelajari {len(daftar_input_historis)} variasi pola input historis yang valid!"
-    )
+    if not data_input_clean:
+        print("--> Error tidak ada data historis valid untuk melatih model.")
+        return
+
+    print(f"--> Melatih Model Machine Learning & Kamus Memori ({len(data_input_clean)} data)...")
+
+    vectorizer = TfidfVectorizer(analyzer='char_wb', ngram_range=(2, 4))
+    X_train = vectorizer.fit_transform(data_input_clean)
+
+    model_nn = NearestNeighbors(n_neighbors=1, metric='cosine')
+    model_nn.fit(X_train)
+
+    print("--> Pelatihan selesai! Memproses pencocokan Hybrid bertingkat...")
 
     hasil_rekomendasi = []
     hasil_skor = []
     hasil_status = []
     hasil_sumber = []
-
-    BATAS_MINIMAL_SKOR = 65.0
 
     for idx, row in df.iterrows():
         input_raw = row[col_input]
@@ -88,13 +96,13 @@ def proses_pencocokan_historis_cerdas(
         if not input_clean:
             hasil_rekomendasi.append("TIDAK DITEMUKAN")
             hasil_skor.append(0.0)
-            hasil_status.append("FAILED (Input Kosong)")
+            hasil_status.append("GAGAL (Input Kosong)")
             hasil_sumber.append("-")
             continue
 
         rekomendasi = "TIDAK DITEMUKAN"
         skor = 0.0
-        status = "FAILED (Data Kosong / Belum Ada Master)"
+        status = "GAGAL (Skor di bawah batas minimal)"
         sumber = "-"
 
         kandidat_lokal = []
@@ -110,28 +118,53 @@ def proses_pencocokan_historis_cerdas(
             skor = 100.0
             status = "SUCCESS (Match Lokal)"
             sumber = sumber_col
+
+        elif input_clean in memori_input_ke_master:
+            rekomendasi = memori_input_ke_master[input_clean]
+            skor = 100.0
+            status = "SUCCESS (Match Exact Memori Historis)"
+            sumber = "Kamus Memori"
+
         else:
-            if input_clean in memori_input_ke_master:
-                rekomendasi = memori_input_ke_master[input_clean]
-                skor = 100.0
-                status = "SUCCESS (Match Exact Memori Historis)"
-                sumber = "Kamus Ingatan Historis"
-            elif daftar_input_historis:
-                match_paling_mirip = process.extract(
+            match_fuzzy = None
+            if daftar_input_historis:
+                res_fuzzy = process.extract(
                     query=input_clean,
                     choices=daftar_input_historis,
                     scorer=fuzz.token_set_ratio,
-                    limit=1,
+                    limit=1
                 )
+                if res_fuzzy:
+                    match_fuzzy = res_fuzzy[0]
 
-                if match_paling_mirip:
-                    input_lama_mirip, skor_kemiripan, _ = match_paling_mirip[0]
+            if match_fuzzy and match_fuzzy[1] >= batas_minimal_fuzzy:
+                input_lama_mirip, skor_fuzzy, _ = match_fuzzy
+                skor = float(skor_fuzzy)
+                rekomendasi = memori_input_ke_master[input_lama_mirip]
+                status = f"SUCCESS (RapidFuzz Match: '{input_lama_mirip}')"
+                sumber = "RapidFuzz (Token Matching)"
 
-                    if float(skor_kemiripan) >= BATAS_MINIMAL_SKOR:
-                        skor = float(skor_kemiripan)
-                        rekomendasi = memori_input_ke_master[input_lama_mirip]
-                        status = f"SUCCESS (Match Pola Input: '{input_lama_mirip}')"
-                        sumber = "Asosiasi Ingatan Input Historis"
+            else:
+                vec_input = vectorizer.transform([input_clean])
+                distances, indices = model_nn.kneighbors(vec_input)
+
+                jarak_cosine = distances[0][0]
+                idx_terdekat = indices[0][0]
+                
+                kemiripan_ml = 1.0 - jarak_cosine
+                skor_ml_persen = round(kemiripan_ml * 100, 2)
+
+                if kemiripan_ml >= batas_minimal_ml:
+                    skor = skor_ml_persen
+                    rekomendasi = data_target_master[idx_terdekat]
+                    input_mirip_ml = data_input_clean[idx_terdekat]
+                    status = f"SUCCESS (ML Prediction - Match: '{input_mirip_ml}')"
+                    sumber = "Model ML (TF-IDF + k-NN)"
+                else:
+                    skor_tertinggi = max(skor_ml_persen, match_fuzzy[1] if match_fuzzy else 0.0)
+                    skor = skor_tertinggi
+                    status = "GAGAL (Skor RapidFuzz & ML di bawah batas minimal)"
+                    sumber = "Hybrid System"
 
         hasil_rekomendasi.append(rekomendasi)
         hasil_skor.append(round(skor, 2))
@@ -144,9 +177,9 @@ def proses_pencocokan_historis_cerdas(
     df["Sumber_Pencocokan"] = hasil_sumber
 
     df.to_excel(file_output, index=False)
-    print("--> PEMROSESAN SELESAI!")
+    print("--> Pemrosesan selesai!")
     print(f"--> File hasil disimpan ke: '{file_output}'")
 
 
 if __name__ == "__main__":
-    proses_pencocokan_historis_cerdas()
+    proses_pencocokan_hybrid()
