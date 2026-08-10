@@ -25,7 +25,8 @@ def jalankan_otomatisasi():
     folder_dapur = "Dapur"
     file_dapur_wajib = [
         "1_CopyData.py",
-        "2_InjectDataToSS.py",
+        "2_AdjDateFormat.py",
+        "3_InjectDataToSS.py",
         "config.conf",
         "credentials.json",
     ]
@@ -57,17 +58,22 @@ def jalankan_otomatisasi():
         print(f"--> Memulai eksekusi '{script_1}' di folder '{folder_dapur}'...")
         subprocess.run([sys.executable, script_1], cwd=folder_dapur, check=True)
         print(f"--> Eksekusi '{script_1}' berhasil dijalankan.")
+        
+        script_2 = "2_AdjDateFormat.py"
+        print(f"--> Memulai eksekusi '{script_2}' di folder '{folder_dapur}'...")
+        subprocess.run([sys.executable, script_2], cwd=folder_dapur, check=True)
+        print(f"--> Eksekusi '{script_2}' berhasil dijalankan.")
 
-        script_2 = "2_InjectDataToSS.py"
+        script_3 = "3_InjectDataToSS.py"
         print(
-            f"--> Memulai eksekusi '{script_2}' di folder '{folder_dapur}'..."
+            f"--> Memulai eksekusi '{script_3}' di folder '{folder_dapur}'..."
         )
         print(
             "--> Catatan: Jika script ini berjalan terus dalam loop, tekan Ctrl+C"
             " untuk menghentikan."
         )
 
-        subprocess.run([sys.executable, script_2], cwd=folder_dapur)
+        subprocess.run([sys.executable, script_3], cwd=folder_dapur)
 
     except subprocess.CalledProcessError as err:
         print(f"--> Terjadi kesalahan saat menjalankan script: {err}")
