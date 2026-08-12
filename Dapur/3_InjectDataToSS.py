@@ -109,7 +109,7 @@ def read_excel_auto_header(file_path, sheet_name=0, target_column=""):
 
 def preload_all_data_to_memory(flag_fraud, ar_key_filter):
     print(
-        f"--> [RAM PRELOAD] Memuat data ke RAM dengan Filter Produk: '{ar_key_filter}'..."
+        f"--> RAM PRELOAD Memuat data ke RAM dengan Filter Produk: '{ar_key_filter}'..."
     )
 
     ml_dict = {}
@@ -136,6 +136,12 @@ def preload_all_data_to_memory(flag_fraud, ar_key_filter):
     if os.path.exists("FBackCust.xlsx"):
         df_fb = pd.read_excel("FBackCust.xlsx")
         df_fb.columns = df_fb.columns.str.strip()
+
+        if "NO." in df_fb.columns:
+            df_fb["NO."] = pd.to_numeric(df_fb["NO."], errors="coerce")
+            df_fb = df_fb.sort_values(by="NO.", ascending=True)
+            df_fb = df_fb.drop_duplicates(subset=["KETERANGAN"], keep="last")
+
         if "KETERANGAN" in df_fb.columns and "NAMA" in df_fb.columns:
             for _, row in df_fb.iterrows():
                 ket = bersihkan_teks(row["KETERANGAN"])
@@ -183,6 +189,8 @@ def preload_all_data_to_memory(flag_fraud, ar_key_filter):
 
         indo_months = {
             "mei": "may",
+            "ags": "aug",
+            "agt": "aug",
             "agu": "aug",
             "okt": "oct",
             "nop": "nov",
@@ -223,7 +231,7 @@ def preload_all_data_to_memory(flag_fraud, ar_key_filter):
             if k_key and k_key != p_key:
                 ar_memory[k_key].append(r_dict)
 
-    print("--> [RAM PRELOAD SELESAI] Data terfilter presisi!\n")
+    print("--> RAM PRELOAD SELESAI Data terfilter presisi!\n")
     return ml_dict, fb_dict, fb_list, ar_memory
 
 
@@ -237,13 +245,13 @@ def resolve_target_name_fast(
     if raw_clean in cache_resolver:
         return cache_resolver[raw_clean]
 
-    if raw_clean in ml_dict:
-        res = ml_dict[raw_clean]
+    if raw_clean in fb_dict:
+        res = fb_dict[raw_clean]
         cache_resolver[raw_clean] = res
         return res
 
-    if raw_clean in fb_dict:
-        res = fb_dict[raw_clean]
+    if raw_clean in ml_dict:
+        res = ml_dict[raw_clean]
         cache_resolver[raw_clean] = res
         return res
 
@@ -303,7 +311,7 @@ def get_ar_rows_fast(target_clean, ar_memory, cache_ar_lookup):
 
 def run_ar_process():
     print(
-        f"--> [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Memulai sinkronisasi data AR..."
+        f"--> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} Memulai sinkronisasi data AR..."
     )
 
     config = load_config()
@@ -339,7 +347,7 @@ def run_ar_process():
 
         if not ar_url:
             print(
-                f"--> [MELEWATI PRODUK {prod_suffix.upper()}] URL (ar_url_{prod_suffix}) tidak diisi di config.conf."
+                f"--> MELEWATI PRODUK {prod_suffix.upper()} URL (ar_url_{prod_suffix}) tidak diisi di config.conf."
             )
             continue
 
@@ -375,7 +383,7 @@ def run_ar_process():
             sheet_id = wks.id
         except Exception as e_conn:
             print(
-                f"--> [ERROR] Gagal membuka Google Sheet {prod_suffix.upper()}: {e_conn}"
+                f"--> Gagal membuka Google Sheet {prod_suffix.upper()}: {e_conn}"
             )
             continue
 
@@ -401,7 +409,7 @@ def run_ar_process():
             )
         except ValueError as e:
             print(
-                f"--> [ERROR] Kolom target di Google Sheets tidak ditemukan: {e}"
+                f"--> Kolom target di Google Sheets tidak ditemukan: {e}"
             )
             continue
 
@@ -486,6 +494,8 @@ def run_ar_process():
                 prev_month_year = None
                 indo_months = {
                     "mei": "may",
+                    "ags": "aug",
+                    "agt": "aug",
                     "agu": "aug",
                     "okt": "oct",
                     "nop": "nov",
@@ -643,7 +653,7 @@ def run_ar_process():
                 chunk = requests[i : i + BATCH_SIZE]
                 ss.batch_update({"requests": chunk})
                 print(
-                    f"--> [BATCH SUCCESS] Mengunggah {len(chunk)} baris ({i + len(chunk)}/{len(requests)}) ke Google Sheets {prod_suffix.upper()}..."
+                    f"--> Mengunggah {len(chunk)} baris ({i + len(chunk)}/{len(requests)}) ke Google Sheets {prod_suffix.upper()}..."
                 )
 
             print(
