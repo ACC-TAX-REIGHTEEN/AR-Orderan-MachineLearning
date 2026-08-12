@@ -136,14 +136,13 @@ def preload_all_data_to_memory(flag_fraud, ar_key_filter):
     if os.path.exists("FBackCust.xlsx"):
         df_fb = pd.read_excel("FBackCust.xlsx")
         df_fb.columns = df_fb.columns.str.strip()
-        if "NAMA" in df_fb.columns:
-            fb_list = (
-                df_fb["NAMA"].dropna().astype(str).str.strip().tolist()
-            )
-            for n in fb_list:
-                k = bersihkan_teks(n)
-                if k:
-                    fb_dict[k] = n
+        if "KETERANGAN" in df_fb.columns and "NAMA" in df_fb.columns:
+            for _, row in df_fb.iterrows():
+                ket = bersihkan_teks(row["KETERANGAN"])
+                nama = str(row["NAMA"]).strip()
+                if ket and nama:
+                    fb_dict[ket] = nama
+                    fb_list.append(ket)
 
     ar_memory = defaultdict(list)
     if os.path.exists("ARClean_temp.xlsx"):
@@ -283,8 +282,8 @@ def get_ar_rows_fast(target_clean, ar_memory, cache_ar_lookup):
             query=target_clean,
             choices=ar_keys,
             scorer=fuzz.token_set_ratio,
-            score_cutoff=80.0,
-            limit=3,
+            score_cutoff=85.0,
+            limit=1,
         )
         if matches:
             combined_rows = []
