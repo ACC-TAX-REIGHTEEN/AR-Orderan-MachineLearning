@@ -129,6 +129,7 @@ def preload_all_data_to_memory(flag_fraud, ar_key_filter):
     )
 
     ml_dict = {}
+    ml_list = []
     if os.path.exists("Hasil_Latihan.xlsx"):
         df_ml = pd.read_excel("Hasil_Latihan.xlsx")
         df_ml.columns = df_ml.columns.str.strip()
@@ -146,6 +147,8 @@ def preload_all_data_to_memory(flag_fraud, ar_key_filter):
                     not in ["TIDAK DITEMUKAN", "FAILED", "NAN", "NONE", ""]
                 ):
                     ml_dict[k] = v
+                    if k not in ml_list:
+                        ml_list.append(k)
 
     fb_dict = {}
     fb_list = []
@@ -248,11 +251,11 @@ def preload_all_data_to_memory(flag_fraud, ar_key_filter):
                 ar_memory[k_key].append(r_dict)
 
     print("--> RAM PRELOAD SELESAI Data terfilter presisi!\n")
-    return ml_dict, fb_dict, fb_list, ar_memory
+    return ml_dict, ml_list, fb_dict, fb_list, ar_memory
 
 
 def resolve_target_name_fast(
-    raw_key, ml_dict, fb_dict, fb_list, cache_resolver, branch_rules
+    raw_key, ml_dict, ml_list, fb_dict, fb_list, cache_resolver, branch_rules
 ):
     raw_clean = bersihkan_teks(raw_key)
     if not raw_clean:
@@ -285,15 +288,27 @@ def resolve_target_name_fast(
         cache_resolver[raw_clean] = res
         return res
 
+    if ml_list:
+        match_ml = process.extractOne(
+            query=raw_clean,
+            choices=ml_list,
+            scorer=fuzz.WRatio,
+            score_cutoff=75.0,
+        )
+        if match_ml:
+            res = ml_dict[match_ml[0]]
+            cache_resolver[raw_clean] = res
+            return res
+
     if fb_list:
-        match = process.extractOne(
+        match_fb = process.extractOne(
             query=raw_clean,
             choices=list(fb_dict.keys()),
-            scorer=fuzz.token_set_ratio,
-            score_cutoff=60.0,
+            scorer=fuzz.WRatio,
+            score_cutoff=80.0,
         )
-        if match:
-            res = fb_dict[match[0]]
+        if match_fb:
+            res = fb_dict[match_fb[0]]
             cache_resolver[raw_clean] = res
             return res
 
@@ -418,7 +433,7 @@ def run_ar_process():
             "--> =================================================================="
         )
 
-        ml_dict, fb_dict, fb_list, ar_memory = preload_all_data_to_memory(
+        ml_dict, ml_list, fb_dict, fb_list, ar_memory = preload_all_data_to_memory(
             flag_fraud, ar_key_filter
         )
 
@@ -488,7 +503,7 @@ def run_ar_process():
             raw_key_clean = bersihkan_teks(raw_key)
 
             nama_target_resmi = resolve_target_name_fast(
-                raw_key, ml_dict, fb_dict, fb_list, cache_resolver, branch_rules
+                raw_key, ml_dict, ml_list, fb_dict, fb_list, cache_resolver, branch_rules
             )
             target_clean = bersihkan_teks(nama_target_resmi)
 
