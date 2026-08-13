@@ -19,6 +19,22 @@ def load_config():
     return config
 
 
+def get_custom_rules(config):
+    group_keywords = []
+    if config.has_section("GROUP_KEYWORDS"):
+        for _, val in config.items("GROUP_KEYWORDS"):
+            if val.strip():
+                group_keywords.append(val.strip().lower())
+
+    branch_rules = {}
+    if config.has_section("BRANCH_RULES"):
+        for key, val in config.items("BRANCH_RULES"):
+            if key.strip() and val.strip():
+                branch_rules[key.strip().lower()] = val.strip()
+
+    return group_keywords, branch_rules
+
+
 def get_product_config(config, suffix):
     if not config.has_section("AR"):
         return "", "", "", "", "", ""
@@ -236,7 +252,7 @@ def preload_all_data_to_memory(flag_fraud, ar_key_filter):
 
 
 def resolve_target_name_fast(
-    raw_key, ml_dict, fb_dict, fb_list, cache_resolver
+    raw_key, ml_dict, fb_dict, fb_list, cache_resolver, branch_rules
 ):
     raw_clean = bersihkan_teks(raw_key)
     if not raw_clean:
@@ -244,6 +260,20 @@ def resolve_target_name_fast(
 
     if raw_clean in cache_resolver:
         return cache_resolver[raw_clean]
+
+    for rule_key, target_name in branch_rules.items():
+        if "|" in rule_key:
+            parent_kw, branch_kw = rule_key.split("|", 1)
+            parent_kw = parent_kw.strip()
+            branch_kw = branch_kw.strip()
+
+            if parent_kw in raw_clean and branch_kw in raw_clean:
+                cache_resolver[raw_clean] = target_name
+                return target_name
+        else:
+            if rule_key in raw_clean:
+                cache_resolver[raw_clean] = target_name
+                return target_name
 
     if raw_clean in fb_dict:
         res = fb_dict[raw_clean]
@@ -272,7 +302,33 @@ def resolve_target_name_fast(
     return res
 
 
-def get_ar_rows_fast(target_clean, ar_memory, cache_ar_lookup):
+def get_ar_rows_fast(
+    target_clean, raw_key_clean, ar_memory, cache_ar_lookup, group_keywords
+):
+    matched_group = None
+    for g_kw in group_keywords:
+        if g_kw in raw_key_clean or g_kw in target_clean:
+            matched_group = g_kw
+            break
+
+    if matched_group:
+        cache_key = f"GROUP_{matched_group}"
+        if cache_key in cache_ar_lookup:
+            return cache_ar_lookup[cache_key]
+
+        combined_rows = []
+        seen_invoices = set()
+        for ar_key, rows in ar_memory.items():
+            if matched_group in ar_key:
+                for r in rows:
+                    inv_no = str(r.get("No. Faktur", ""))
+                    if inv_no not in seen_invoices:
+                        seen_invoices.add(inv_no)
+                        combined_rows.append(r)
+
+        cache_ar_lookup[cache_key] = combined_rows
+        return combined_rows
+
     if not target_clean:
         return []
 
@@ -315,6 +371,7 @@ def run_ar_process():
     )
 
     config = load_config()
+    group_keywords, branch_rules = get_custom_rules(config)
 
     flag_fraud = config.get("AR", "ar_data_fraud", fallback="No").strip()
     flag_codecus = config.get("AR", "ar_data_codecus", fallback="Ya").strip()
@@ -428,8 +485,10 @@ def run_ar_process():
             if not str(raw_key).strip():
                 continue
 
+            raw_key_clean = bersihkan_teks(raw_key)
+
             nama_target_resmi = resolve_target_name_fast(
-                raw_key, ml_dict, fb_dict, fb_list, cache_resolver
+                raw_key, ml_dict, fb_dict, fb_list, cache_resolver, branch_rules
             )
             target_clean = bersihkan_teks(nama_target_resmi)
 
@@ -445,7 +504,7 @@ def run_ar_process():
                 product_val = row[prod_col_idx].strip()
 
             user_ar_rows = get_ar_rows_fast(
-                target_clean, ar_memory, cache_ar_lookup
+                target_clean, raw_key_clean, ar_memory, cache_ar_lookup, group_keywords
             )
 
             total_sisa_piutang = sum([
