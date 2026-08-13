@@ -175,33 +175,61 @@ def preload_all_data_to_memory(flag_fraud, ar_key_filter):
             "ARClean_temp.xlsx", sheet_name=0, target_column="Nama Pelanggan"
         )
 
-        if "Nama Penjual" in df_ar.columns:
+        col_map = {str(c).strip().lower(): c for c in df_ar.columns}
+        col_penjual = col_map.get("nama penjual")
+        col_kontak = col_map.get("nama kontak")
+        col_pelanggan = col_map.get("nama pelanggan")
+
+        if col_penjual:
             df_ar = df_ar[
-                df_ar["Nama Penjual"]
+                df_ar[col_penjual]
                 .astype(str)
                 .str.contains("SR", case=False, na=False)
             ]
 
-        if ar_key_filter and "Nama Kontak" in df_ar.columns:
-            df_ar = df_ar[
-                df_ar["Nama Kontak"]
-                .astype(str)
-                .str.contains(ar_key_filter, case=False, na=False)
-            ]
+        if ar_key_filter and str(ar_key_filter).strip():
+            filter_str = str(ar_key_filter).strip()
 
-        if flag_fraud == "No" and "Nama Penjual" in df_ar.columns:
+            cond_kontak = (
+                df_ar[col_kontak]
+                .astype(str)
+                .str.contains(filter_str, case=False, na=False)
+                if col_kontak
+                else pd.Series(False, index=df_ar.index)
+            )
+
+            cond_penjual = (
+                df_ar[col_penjual]
+                .astype(str)
+                .str.contains(filter_str, case=False, na=False)
+                if col_penjual
+                else pd.Series(False, index=df_ar.index)
+            )
+
+            cond_pelanggan = (
+                df_ar[col_pelanggan]
+                .astype(str)
+                .str.contains(filter_str, case=False, na=False)
+                if col_pelanggan
+                else pd.Series(False, index=df_ar.index)
+            )
+
+            df_ar = df_ar[cond_kontak | cond_penjual | cond_pelanggan]
+
+        if flag_fraud == "No" and col_penjual:
             df_ar = df_ar[
-                ~df_ar["Nama Penjual"]
+                ~df_ar[col_penjual]
                 .astype(str)
                 .str.contains("FRAUD", case=False, na=False)
             ]
 
-        if "No. Faktur" in df_ar.columns:
+        col_faktur = col_map.get("no. faktur") or col_map.get("no faktur")
+        if col_faktur:
             df_ar = df_ar[
-                df_ar["No. Faktur"].notna()
-                & (df_ar["No. Faktur"].astype(str).str.strip() != "")
+                df_ar[col_faktur].notna()
+                & (df_ar[col_faktur].astype(str).str.strip() != "")
                 & (
-                    df_ar["No. Faktur"].astype(str).str.strip().str.lower()
+                    df_ar[col_faktur].astype(str).str.strip().str.lower()
                     != "nan"
                 )
             ]
@@ -227,23 +255,20 @@ def preload_all_data_to_memory(flag_fraud, ar_key_filter):
                     break
             return pd.to_datetime(val_str, errors="coerce", format="mixed")
 
-        if "Tgl Faktur" in df_ar.columns:
-            df_ar["Temp_Sort_Date"] = df_ar["Tgl Faktur"].apply(parse_date_sort)
+        col_tgl_faktur = col_map.get("tgl faktur")
+        if col_tgl_faktur:
+            df_ar["Temp_Sort_Date"] = df_ar[col_tgl_faktur].apply(parse_date_sort)
 
         sort_cols = [
-            c for c in ["Temp_Sort_Date", "No. Faktur"] if c in df_ar.columns
+            c for c in ["Temp_Sort_Date", col_faktur] if c and c in df_ar.columns
         ]
         if sort_cols:
             df_ar = df_ar.sort_values(by=sort_cols, ascending=[True, True])
 
         for _, r in df_ar.iterrows():
             r_dict = r.to_dict()
-            p_key = bersihkan_teks(r.get("Nama Pelanggan", ""))
-            k_key = (
-                bersihkan_teks(r.get("Nama Kontak", ""))
-                if "Nama Kontak" in df_ar.columns
-                else ""
-            )
+            p_key = bersihkan_teks(r.get(col_pelanggan, "")) if col_pelanggan else ""
+            k_key = bersihkan_teks(r.get(col_kontak, "")) if col_kontak else ""
 
             if p_key:
                 ar_memory[p_key].append(r_dict)
@@ -360,7 +385,7 @@ def get_ar_rows_fast(
         matches = process.extract(
             query=target_clean,
             choices=ar_keys,
-            scorer=fuzz.token_set_ratio,
+            scorer=fuzz.token_sort_ratio,
             score_cutoff=85.0,
             limit=1,
         )
