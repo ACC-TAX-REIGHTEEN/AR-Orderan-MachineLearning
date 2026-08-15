@@ -33,7 +33,7 @@ def jalankan_otomatisasi():
 
     folder_ml = "ML"
     file_ml_wajib = [
-        "Hasil_Latihan.xlsx",
+        "Hasil_Latihan_temp.xlsx",
         "LookupData.py",
         "TrainingModel.py",
         "TheTrainningData.xlsx",
