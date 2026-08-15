@@ -130,8 +130,8 @@ def preload_all_data_to_memory(flag_fraud, ar_key_filter):
 
     ml_dict = {}
     ml_list = []
-    if os.path.exists("Hasil_Latihan.xlsx"):
-        df_ml = pd.read_excel("Hasil_Latihan.xlsx")
+    if os.path.exists("Hasil_Latihan_temp.xlsx"):
+        df_ml = pd.read_excel("Hasil_Latihan_temp.xlsx")
         df_ml.columns = df_ml.columns.str.strip()
         if (
             "Nama Customer dan Kota" in df_ml.columns
@@ -152,8 +152,8 @@ def preload_all_data_to_memory(flag_fraud, ar_key_filter):
 
     fb_dict = {}
     fb_list = []
-    if os.path.exists("FBackCust.xlsx"):
-        df_fb = pd.read_excel("FBackCust.xlsx")
+    if os.path.exists("FBackCust_temp.xlsx"):
+        df_fb = pd.read_excel("FBackCust_temp.xlsx")
         df_fb.columns = df_fb.columns.str.strip()
 
         if "NO." in df_fb.columns:
