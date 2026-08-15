@@ -30,7 +30,7 @@ def bersihkan_teks_input(teks):
 
 def proses_pencocokan_hybrid(
     file_input="TheTrainningData.xlsx",
-    file_output="Hasil_Latihan.xlsx",
+    file_output="Hasil_Latihan_temp.xlsx",
     batas_minimal_fuzzy=75.0,  # Batas skor minimal RapidFuzz (0 - 100)
     batas_minimal_ml=0.65       # Batas skor minimal ML Cosine Similarity (0.0 - 1.0)
 ):
