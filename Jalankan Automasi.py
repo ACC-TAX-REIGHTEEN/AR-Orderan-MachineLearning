@@ -24,6 +24,7 @@ def jalankan_otomatisasi():
 
     folder_dapur = "Dapur"
     file_dapur_wajib = [
+        "0_DownloaderData.py",
         "1_CopyData.py",
         "2_AdjDateFormat.py",
         "3_InjectDataToSS.py",
@@ -54,6 +55,11 @@ def jalankan_otomatisasi():
     print("--> Semua folder dan file terverifikasi lengkap!")
 
     try:
+        script_0 = "0_DownloaderData.py"
+        print(f"--> Memulai eksekusi '{script_0}' di folder '{folder_dapur}'...")
+        subprocess.run([sys.executable, script_0], cwd=folder_dapur, check=True)
+        print(f"--> Eksekusi '{script_0}' berhasil dijalankan.")
+        
         script_1 = "1_CopyData.py"
         print(f"--> Memulai eksekusi '{script_1}' di folder '{folder_dapur}'...")
         subprocess.run([sys.executable, script_1], cwd=folder_dapur, check=True)
