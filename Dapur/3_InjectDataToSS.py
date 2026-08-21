@@ -22,9 +22,9 @@ def load_config():
 def get_general_config(config):
     noo_keywords = []
     if config.has_section("GENERAL"):
-        gen_company = config.get("GENERAL", "gen_company_name", fallback="").strip()
-        if gen_company:
-            noo_keywords = [k.strip().lower() for k in gen_company.split(",") if k.strip()]
+        gen_new_cust = config.get("GENERAL", "gen_new_cust", fallback="").strip()
+        if gen_new_cust:
+            noo_keywords = [k.strip().lower() for k in gen_new_cust.split(",") if k.strip()]
     return noo_keywords
 
 
