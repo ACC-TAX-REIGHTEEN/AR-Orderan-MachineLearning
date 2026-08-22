@@ -24,7 +24,9 @@ def get_general_config(config):
     if config.has_section("GENERAL"):
         gen_new_cust = config.get("GENERAL", "gen_new_cust", fallback="").strip()
         if gen_new_cust:
-            noo_keywords = [k.strip().lower() for k in gen_new_cust.split(",") if k.strip()]
+            noo_keywords = [
+                k.strip().lower() for k in gen_new_cust.split(",") if k.strip()
+            ]
     return noo_keywords
 
 
@@ -106,7 +108,9 @@ def format_excel_date(date_val):
     return str(date_val)
 
 
-def standardize_code(code, depo_prefixes="SL|YY|MKS|MGL|PW|PWT|PLU|SG|SMG|TGL|PA|KDI"):
+def standardize_code(
+    code, depo_prefixes="SL|YY|MKS|MGL|PW|PWT|PLU|SG|SMG|TGL|PA|KDI"
+):
     if pd.isna(code):
         return ""
     if isinstance(code, float) and code.is_integer():
@@ -128,8 +132,16 @@ def load_minifs_mapping(minifs_file="Minifs_temp.xlsx"):
         df_m = pd.read_excel(minifs_file)
         df_m.columns = df_m.columns.str.strip()
 
-        col_min = [c for c in df_m.columns if "min" in c.lower() and "pelanggan" in c.lower()]
-        col_nopel = [c for c in df_m.columns if c.lower() == "no. pelanggan" or c.lower() == "kode pelanggan"]
+        col_min = [
+            c
+            for c in df_m.columns
+            if "min" in c.lower() and "pelanggan" in c.lower()
+        ]
+        col_nopel = [
+            c
+            for c in df_m.columns
+            if c.lower() == "no. pelanggan" or c.lower() == "kode pelanggan"
+        ]
 
         if col_min and col_nopel:
             c_min = col_min[0]
@@ -188,7 +200,11 @@ def preload_all_data_to_memory(flag_fraud, ar_key_filter, config):
         f"--> RAM PRELOAD Memuat data ke RAM dengan Filter Produk: '{ar_key_filter}'..."
     )
 
-    depo_config = config.get("MAP", "depo", fallback="SL|YY|MKS|MGL|PW|PWT|PLU|SG|SMG|TGL|PA|KDI").strip()
+    depo_config = config.get(
+        "MAP",
+        "depo",
+        fallback="SL|YY|MKS|MGL|PW|PWT|PLU|SG|SMG|TGL|PA|KDI",
+    ).strip()
     minifs_mapping = load_minifs_mapping("Minifs_temp.xlsx")
 
     ml_dict = {}
@@ -242,7 +258,9 @@ def preload_all_data_to_memory(flag_fraud, ar_key_filter, config):
         col_penjual = col_map.get("nama penjual")
         col_kontak = col_map.get("nama kontak")
         col_pelanggan = col_map.get("nama pelanggan")
-        col_raw_code = col_map.get("no. pelanggan") or col_map.get("kode pelanggan")
+        col_raw_code = col_map.get("no. pelanggan") or col_map.get(
+            "kode pelanggan"
+        )
 
         if col_penjual:
             df_ar = df_ar[
@@ -321,17 +339,25 @@ def preload_all_data_to_memory(flag_fraud, ar_key_filter, config):
 
         col_tgl_faktur = col_map.get("tgl faktur")
         if col_tgl_faktur:
-            df_ar["Temp_Sort_Date"] = df_ar[col_tgl_faktur].apply(parse_date_sort)
+            df_ar["Temp_Sort_Date"] = df_ar[col_tgl_faktur].apply(
+                parse_date_sort
+            )
 
         sort_cols = [
-            c for c in ["Temp_Sort_Date", col_faktur] if c and c in df_ar.columns
+            c
+            for c in ["Temp_Sort_Date", col_faktur]
+            if c and c in df_ar.columns
         ]
         if sort_cols:
             df_ar = df_ar.sort_values(by=sort_cols, ascending=[True, True])
 
         for _, r in df_ar.iterrows():
             r_dict = r.to_dict()
-            p_key = bersihkan_teks(r.get(col_pelanggan, "")) if col_pelanggan else ""
+            p_key = (
+                bersihkan_teks(r.get(col_pelanggan, ""))
+                if col_pelanggan
+                else ""
+            )
             k_key = bersihkan_teks(r.get(col_kontak, "")) if col_kontak else ""
 
             if p_key:
@@ -350,7 +376,15 @@ def preload_all_data_to_memory(flag_fraud, ar_key_filter, config):
                         ar_memory[f"CODE_{std_c.lower()}"].append(r_dict)
 
     print("--> RAM PRELOAD SELESAI Data terfilter presisi!\n")
-    return ml_dict, ml_list, fb_dict, fb_list, ar_memory, minifs_mapping, depo_config
+    return (
+        ml_dict,
+        ml_list,
+        fb_dict,
+        fb_list,
+        ar_memory,
+        minifs_mapping,
+        depo_config,
+    )
 
 
 def resolve_target_name_fast(
@@ -392,14 +426,14 @@ def resolve_target_name_fast(
             query=raw_clean,
             choices=ml_list,
             scorer=fuzz.WRatio,
-            score_cutoff=75.0,
+            score_cutoff=82.0,
         )
         if not match_ml:
             match_ml = process.extractOne(
                 query=raw_clean,
                 choices=ml_list,
                 scorer=fuzz.token_set_ratio,
-                score_cutoff=70.0,
+                score_cutoff=82.0,
             )
         if match_ml:
             res = ml_dict[match_ml[0]]
@@ -411,14 +445,14 @@ def resolve_target_name_fast(
             query=raw_clean,
             choices=list(fb_dict.keys()),
             scorer=fuzz.WRatio,
-            score_cutoff=80.0,
+            score_cutoff=85.0,
         )
         if not match_fb:
             match_fb = process.extractOne(
                 query=raw_clean,
                 choices=list(fb_dict.keys()),
                 scorer=fuzz.token_set_ratio,
-                score_cutoff=70.0,
+                score_cutoff=82.0,
             )
         if match_fb:
             res = fb_dict[match_fb[0]]
@@ -431,7 +465,13 @@ def resolve_target_name_fast(
 
 
 def get_ar_rows_fast(
-    target_clean, raw_key_clean, ar_memory, cache_ar_lookup, group_keywords, minifs_mapping, depo_config
+    target_clean,
+    raw_key_clean,
+    ar_memory,
+    cache_ar_lookup,
+    group_keywords,
+    minifs_mapping,
+    depo_config,
 ):
     cache_key = f"{raw_key_clean}|{target_clean}"
     if cache_key in cache_ar_lookup:
@@ -461,7 +501,11 @@ def get_ar_rows_fast(
         cache_ar_lookup[g_cache_key] = combined_rows
         return combined_rows
 
-    raw_codes = [k.strip() for k in raw_key_clean.replace("nopel:", "").split("&") if k.strip()]
+    raw_codes = [
+        k.strip()
+        for k in raw_key_clean.replace("nopel:", "").split("&")
+        if k.strip()
+    ]
     target_codes_set = set()
     for r_code in raw_codes:
         code_upper = r_code.upper()
@@ -498,7 +542,12 @@ def get_ar_rows_fast(
 
     if query_tokens:
         matching_keys = [
-            k for k in ar_keys if all(token in k for token in query_tokens)
+            k
+            for k in ar_keys
+            if all(
+                re.search(rf"\b{re.escape(token)}\b", k)
+                for token in query_tokens
+            )
         ]
         if matching_keys:
             for k in matching_keys:
@@ -514,7 +563,12 @@ def get_ar_rows_fast(
     target_tokens = [t for t in target_clean.split() if len(t) > 0]
     if target_tokens and target_tokens != query_tokens:
         matching_keys = [
-            k for k in ar_keys if all(token in k for token in target_tokens)
+            k
+            for k in ar_keys
+            if all(
+                re.search(rf"\b{re.escape(token)}\b", k)
+                for token in target_tokens
+            )
         ]
         if matching_keys:
             for k in matching_keys:
@@ -532,8 +586,8 @@ def get_ar_rows_fast(
             query=target_clean,
             choices=ar_keys,
             scorer=fuzz.token_set_ratio,
-            score_cutoff=70.0,
-            limit=10
+            score_cutoff=85.0,
+            limit=10,
         )
         if matches:
             for m in matches:
@@ -604,9 +658,15 @@ def run_ar_process():
             "--> =================================================================="
         )
 
-        ml_dict, ml_list, fb_dict, fb_list, ar_memory, minifs_mapping, depo_config = preload_all_data_to_memory(
-            flag_fraud, ar_key_filter, config
-        )
+        (
+            ml_dict,
+            ml_list,
+            fb_dict,
+            fb_list,
+            ar_memory,
+            minifs_mapping,
+            depo_config,
+        ) = preload_all_data_to_memory(flag_fraud, ar_key_filter, config)
 
         cache_resolver = {}
         cache_ar_lookup = {}
@@ -703,7 +763,7 @@ def run_ar_process():
                     "========================================",
                     "DAFTAR RINCIAN FAKTUR AKTIF",
                     "========================================",
-                    "Outlet Baru (NOO)"
+                    "Outlet Baru (NOO)",
                 ]
                 final_note_text = "\n".join(note_lines)
 
@@ -714,7 +774,9 @@ def run_ar_process():
                                 "values": [
                                     {
                                         "userEnteredValue": {
-                                            "stringValue": "0" if flag_calc == "Ya" else ""
+                                            "stringValue": "0"
+                                            if flag_calc == "Ya"
+                                            else ""
                                         },
                                         "note": final_note_text,
                                     }
@@ -738,15 +800,28 @@ def run_ar_process():
             raw_key_clean = bersihkan_teks(raw_key)
 
             nama_target_resmi = resolve_target_name_fast(
-                raw_key, ml_dict, ml_list, fb_dict, fb_list, cache_resolver, branch_rules
+                raw_key,
+                ml_dict,
+                ml_list,
+                fb_dict,
+                fb_list,
+                cache_resolver,
+                branch_rules,
             )
             target_clean = bersihkan_teks(nama_target_resmi)
 
             user_ar_rows = get_ar_rows_fast(
-                target_clean, raw_key_clean, ar_memory, cache_ar_lookup, group_keywords, minifs_mapping, depo_config
+                target_clean,
+                raw_key_clean,
+                ar_memory,
+                cache_ar_lookup,
+                group_keywords,
+                minifs_mapping,
+                depo_config,
             )
 
             if user_ar_rows:
+
                 def ambil_tanggal_sort(r):
                     tgl = r.get("Temp_Sort_Date")
                     if pd.notna(tgl):
@@ -755,11 +830,13 @@ def run_ar_process():
 
                 user_ar_rows = sorted(user_ar_rows, key=ambil_tanggal_sort)
 
-            total_sisa_piutang = sum([
-                float(r.get("Sisa Piutang", 0))
-                for r in user_ar_rows
-                if pd.notna(r.get("Sisa Piutang"))
-            ])
+            total_sisa_piutang = sum(
+                [
+                    float(r.get("Sisa Piutang", 0))
+                    for r in user_ar_rows
+                    if pd.notna(r.get("Sisa Piutang"))
+                ]
+            )
             formatted_piutang_val = format_idr(total_sisa_piutang)
 
             note_lines = []
@@ -903,7 +980,9 @@ def run_ar_process():
                         except Exception:
                             inv_part.append("-\tHR")
 
-                    line_str = "\t".join([str(x) for x in inv_part if x != ""])
+                    line_str = "\t".join(
+                        [str(x) for x in inv_part if x != ""]
+                    )
 
                     if (
                         flag_giro == "Ya"
