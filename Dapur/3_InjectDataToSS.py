@@ -9,6 +9,9 @@ import gspread
 from google.oauth2.service_account import Credentials
 import pandas as pd
 from rapidfuzz import fuzz, process
+import openpyxl
+from openpyxl.styles import Font, Alignment
+from openpyxl.utils import get_column_letter
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -193,6 +196,150 @@ def read_excel_auto_header(file_path, sheet_name=0, target_column=""):
     raise KeyError(
         f"Kolom target '{target_column}' tidak ditemukan pada file '{file_path}'"
     )
+
+
+def simpan_ar_ke_local_excel(user_ar_rows, nama_pelanggan_resmi, config):
+    if not user_ar_rows:
+        return
+
+    save_dir = config.get(
+        "DIR", "save_to_local", fallback=r"E:\ADM IRC AND ZN\2026\AGU\\"
+    ).strip()
+
+    if not os.path.exists(save_dir):
+        try:
+            os.makedirs(save_dir, exist_ok=True)
+        except Exception as e_dir:
+            print(f"--> [ERROR] Gagal membuat direktori {save_dir}: {e_dir}")
+            return
+
+    def get_val(row_dict, key_candidates, default=""):
+        for k in key_candidates:
+            if k in row_dict and pd.notna(row_dict[k]):
+                return str(row_dict[k]).strip()
+        return default
+
+    first_row = user_ar_rows[0]
+    nama_kontak = get_val(first_row, ["Nama Kontak", "nama kontak"])
+    nama_penjual = get_val(first_row, ["Nama Penjual", "nama penjual"])
+
+    indo_months_short = {
+        1: "JAN",
+        2: "PEB",
+        3: "MAR",
+        4: "APR",
+        5: "MEI",
+        6: "JUN",
+        7: "JUL",
+        8: "AGU",
+        9: "SEP",
+        10: "OKT",
+        11: "NOP",
+        12: "DES",
+    }
+    now = datetime.now()
+    tgl_str = (
+        f"{now.day:02d} {indo_months_short[now.month]} {str(now.year)[-2:]}"
+    )
+
+    raw_file_name = f"{nama_pelanggan_resmi}, {nama_kontak}, {nama_penjual} , {tgl_str}"
+    clean_file_name = re.sub(r'[\\/:*?"<>|]', "-", raw_file_name)
+    clean_file_name = re.sub(r"\s+", " ", clean_file_name).strip()
+
+    full_save_path = os.path.join(save_dir, f"{clean_file_name}.xlsx")
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Sheet1"
+
+    font_header = Font(name="Arial", size=10, bold=True, color="000266")
+    font_data = Font(name="Arial", size=10)
+    font_total = Font(name="Arial", size=10, bold=True, color="000266")
+
+    headers_layout = {
+        1: "No. Faktur",
+        2: "Tgl Faktur",
+        4: "Jatuh Tempo",
+        6: "Nilai Faktur",
+        7: "Sisa Piutang",
+        8: "Umur JT",
+        9: "Nama Pelanggan",
+        10: "Nama Penjual",
+        11: "Nama Kontak",
+    }
+
+    for col_idx, col_name in headers_layout.items():
+        cell = ws.cell(row=1, column=col_idx, value=col_name)
+        cell.font = font_header
+
+    row_start = 2
+    for idx, r in enumerate(user_ar_rows, start=row_start):
+        no_faktur = get_val(r, ["No. Faktur", "no. faktur", "no faktur"])
+        tgl_faktur = format_excel_date(r.get("Tgl Faktur"))
+        jt_faktur = format_excel_date(r.get("Jatuh Tempo"))
+
+        try:
+            nilai_faktur = (
+                float(r.get("Nilai Faktur", 0))
+                if pd.notna(r.get("Nilai Faktur"))
+                else 0.0
+            )
+        except Exception:
+            nilai_faktur = 0.0
+
+        try:
+            sisa_piutang = (
+                float(r.get("Sisa Piutang", 0))
+                if pd.notna(r.get("Sisa Piutang"))
+                else 0.0
+            )
+        except Exception:
+            sisa_piutang = 0.0
+
+        umur_jt = get_val(r, ["Umur JT", "umur jt"])
+        c_pelanggan = get_val(
+            r, ["Nama Pelanggan", "nama pelanggan"], default=nama_pelanggan_resmi
+        )
+        c_penjual = get_val(r, ["Nama Penjual", "nama penjual"])
+        c_kontak = get_val(r, ["Nama Kontak", "nama kontak"])
+
+        ws.cell(row=idx, column=1, value=no_faktur).font = font_data
+        ws.cell(row=idx, column=2, value=tgl_faktur).font = font_data
+        ws.cell(row=idx, column=4, value=jt_faktur).font = font_data
+
+        cell_nf = ws.cell(row=idx, column=6, value=nilai_faktur)
+        cell_nf.font = font_data
+        cell_nf.number_format = "#,##0"
+
+        cell_sp = ws.cell(row=idx, column=7, value=sisa_piutang)
+        cell_sp.font = font_data
+        cell_sp.number_format = "#,##0"
+
+        ws.cell(row=idx, column=8, value=umur_jt).font = font_data
+        ws.cell(row=idx, column=9, value=c_pelanggan).font = font_data
+        ws.cell(row=idx, column=10, value=c_penjual).font = font_data
+        ws.cell(row=idx, column=11, value=c_kontak).font = font_data
+
+    last_data_row = row_start + len(user_ar_rows) - 1
+    total_row = last_data_row + 1
+
+    cell_tot_f = ws.cell(
+        row=total_row, column=6, value=f"=SUM(F2:F{last_data_row})"
+    )
+    cell_tot_f.font = font_total
+    cell_tot_f.number_format = "#,##0"
+
+    cell_tot_g = ws.cell(
+        row=total_row, column=7, value=f"=SUM(G2:G{last_data_row})"
+    )
+    cell_tot_g.font = font_total
+    cell_tot_g.number_format = "#,##0"
+
+    try:
+        wb.save(full_save_path)
+        print(f"--> [LOKAL BERHASIL] File disave: {clean_file_name}.xlsx")
+    except Exception as e_save:
+        print(f"--> [LOKAL GAGAL] Tidak dapat menyimpan file: {e_save}")
 
 
 def preload_all_data_to_memory(flag_fraud, ar_key_filter, config):
@@ -829,6 +976,8 @@ def run_ar_process():
                     return pd.Timestamp.min
 
                 user_ar_rows = sorted(user_ar_rows, key=ambil_tanggal_sort)
+
+                simpan_ar_ke_local_excel(user_ar_rows, nama_target_resmi, config)
 
             total_sisa_piutang = sum(
                 [
