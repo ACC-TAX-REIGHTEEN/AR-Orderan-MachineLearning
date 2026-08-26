@@ -170,7 +170,7 @@ def load_minifs_mapping(minifs_file="Minifs_temp.xlsx"):
                 if m_val:
                     min_to_group[m_val].add(m_val)
                 if n_val:
-                    min_to_group[m_val].add(n_val)
+                    min_to_group[n_val].add(n_val)
 
             for m_val, group_set in min_to_group.items():
                 for code_item in group_set:
@@ -682,11 +682,77 @@ def get_ar_rows_fast(
         return combined_code_rows
 
     ar_keys = [k for k in ar_memory.keys() if not k.startswith("CODE_")]
+    is_ml_mapped = bool(target_clean and target_clean != raw_key_clean)
 
-    query_tokens = [t for t in raw_key_clean.split() if len(t) > 0]
+    if is_ml_mapped:
+        matched_rows = []
+        seen_invoices = set()
+
+        if target_clean in ar_memory:
+            for r in ar_memory[target_clean]:
+                inv_no = str(r.get("No. Faktur", ""))
+                if inv_no not in seen_invoices:
+                    seen_invoices.add(inv_no)
+                    matched_rows.append(r)
+            if matched_rows:
+                cache_ar_lookup[cache_key] = matched_rows
+                return matched_rows
+
+        target_tokens = [t for t in target_clean.split() if len(t) > 0]
+        if target_tokens:
+            matching_keys = [
+                k
+                for k in ar_keys
+                if all(
+                    re.search(rf"\b{re.escape(token)}\b", k)
+                    for token in target_tokens
+                )
+            ]
+            if matching_keys:
+                for k in matching_keys:
+                    for r in ar_memory[k]:
+                        inv_no = str(r.get("No. Faktur", ""))
+                        if inv_no not in seen_invoices:
+                            seen_invoices.add(inv_no)
+                            matched_rows.append(r)
+                if matched_rows:
+                    cache_ar_lookup[cache_key] = matched_rows
+                    return matched_rows
+
+        if ar_keys:
+            matches = process.extract(
+                query=target_clean,
+                choices=ar_keys,
+                scorer=fuzz.WRatio,
+                score_cutoff=85.0,
+                limit=10,
+            )
+            if not matches:
+                matches = process.extract(
+                    query=target_clean,
+                    choices=ar_keys,
+                    scorer=fuzz.token_set_ratio,
+                    score_cutoff=85.0,
+                    limit=10,
+                )
+            if matches:
+                for m in matches:
+                    for r in ar_memory[m[0]]:
+                        inv_no = str(r.get("No. Faktur", ""))
+                        if inv_no not in seen_invoices:
+                            seen_invoices.add(inv_no)
+                            matched_rows.append(r)
+                if matched_rows:
+                    cache_ar_lookup[cache_key] = matched_rows
+                    return matched_rows
+
+        cache_ar_lookup[cache_key] = []
+        return []
+
     matched_rows = []
     seen_invoices = set()
 
+    query_tokens = [t for t in raw_key_clean.split() if len(t) > 0]
     if query_tokens:
         matching_keys = [
             k
@@ -707,35 +773,22 @@ def get_ar_rows_fast(
                 cache_ar_lookup[cache_key] = matched_rows
                 return matched_rows
 
-    target_tokens = [t for t in target_clean.split() if len(t) > 0]
-    if target_tokens and target_tokens != query_tokens:
-        matching_keys = [
-            k
-            for k in ar_keys
-            if all(
-                re.search(rf"\b{re.escape(token)}\b", k)
-                for token in target_tokens
-            )
-        ]
-        if matching_keys:
-            for k in matching_keys:
-                for r in ar_memory[k]:
-                    inv_no = str(r.get("No. Faktur", ""))
-                    if inv_no not in seen_invoices:
-                        seen_invoices.add(inv_no)
-                        matched_rows.append(r)
-            if matched_rows:
-                cache_ar_lookup[cache_key] = matched_rows
-                return matched_rows
-
-    if ar_keys and target_clean:
+    if ar_keys and raw_key_clean:
         matches = process.extract(
-            query=target_clean,
+            query=raw_key_clean,
             choices=ar_keys,
-            scorer=fuzz.token_set_ratio,
+            scorer=fuzz.WRatio,
             score_cutoff=85.0,
             limit=10,
         )
+        if not matches:
+            matches = process.extract(
+                query=raw_key_clean,
+                choices=ar_keys,
+                scorer=fuzz.token_set_ratio,
+                score_cutoff=85.0,
+                limit=10,
+            )
         if matches:
             for m in matches:
                 for r in ar_memory[m[0]]:
