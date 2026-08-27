@@ -1,5 +1,5 @@
 import configparser
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 import os
 import re
@@ -87,6 +87,36 @@ def bersihkan_teks(teks):
     t = str(teks).lower()
     t = re.sub(r"[^\w\s]", " ", t)
     return " ".join(t.split())
+
+
+def extract_dynamic_generic_words(
+    df_ar, col_pelanggan, col_kontak, base_words, threshold_ratio=0.02
+):
+    token_counter = Counter()
+    unique_texts = set()
+
+    if col_pelanggan and col_pelanggan in df_ar.columns:
+        unique_texts.update(df_ar[col_pelanggan].dropna().astype(str).unique())
+    if col_kontak and col_kontak in df_ar.columns:
+        unique_texts.update(df_ar[col_kontak].dropna().astype(str).unique())
+
+    total_records = len(unique_texts)
+    if total_records == 0:
+        return set(base_words)
+
+    for text in unique_texts:
+        tokens = set(bersihkan_teks(text).split())
+        for token in tokens:
+            if len(token) > 1:
+                token_counter[token] += 1
+
+    dynamic_detected = {
+        token
+        for token, count in token_counter.items()
+        if (count / total_records) >= threshold_ratio
+    }
+
+    return set(base_words).union(dynamic_detected)
 
 
 def validate_ml_match(target_clean, candidate_key, generic_words=None):
@@ -395,6 +425,7 @@ def preload_all_data_to_memory(flag_fraud, ar_key_filter, config):
         fallback="SL|YY|MKS|MGL|PW|PWT|PLU|SG|SMG|TGL|PA|KDI",
     ).strip()
     minifs_mapping = load_minifs_mapping("Minifs_temp.xlsx")
+    _, base_generic_words = get_general_config(config)
 
     ml_dict = {}
     ml_list = []
@@ -438,6 +469,8 @@ def preload_all_data_to_memory(flag_fraud, ar_key_filter, config):
                     fb_list.append(ket)
 
     ar_memory = defaultdict(list)
+    dynamic_generic_words = set(base_generic_words)
+
     if os.path.exists("ARClean_temp.xlsx"):
         df_ar = read_excel_auto_header(
             "ARClean_temp.xlsx", sheet_name=0, target_column="Nama Pelanggan"
@@ -449,6 +482,14 @@ def preload_all_data_to_memory(flag_fraud, ar_key_filter, config):
         col_pelanggan = col_map.get("nama pelanggan")
         col_raw_code = col_map.get("no. pelanggan") or col_map.get(
             "kode pelanggan"
+        )
+
+        dynamic_generic_words = extract_dynamic_generic_words(
+            df_ar=df_ar,
+            col_pelanggan=col_pelanggan,
+            col_kontak=col_kontak,
+            base_words=base_generic_words,
+            threshold_ratio=0.02,
         )
 
         if col_penjual:
@@ -564,6 +605,9 @@ def preload_all_data_to_memory(flag_fraud, ar_key_filter, config):
                     if std_c.lower() != clean_raw.lower():
                         ar_memory[f"CODE_{std_c.lower()}"].append(r_dict)
 
+    print(
+        f"--> [AUTO-STOPWORDS] Terdeteksi {len(dynamic_generic_words)} kata generik/wilayah secara otomatis."
+    )
     print("--> RAM PRELOAD SELESAI Data terfilter presisi!\n")
     return (
         ml_dict,
@@ -573,12 +617,23 @@ def preload_all_data_to_memory(flag_fraud, ar_key_filter, config):
         ar_memory,
         minifs_mapping,
         depo_config,
+        dynamic_generic_words,
     )
 
 
 def resolve_target_name_fast(
-    raw_key, ml_dict, ml_list, fb_dict, fb_list, cache_resolver, branch_rules
+    raw_key,
+    ml_dict,
+    ml_list,
+    fb_dict,
+    fb_list,
+    cache_resolver,
+    branch_rules,
+    generic_words=None,
 ):
+    if generic_words is None:
+        generic_words = set()
+
     raw_clean = bersihkan_teks(raw_key)
     if not raw_clean:
         return str(raw_key).strip()
@@ -611,42 +666,52 @@ def resolve_target_name_fast(
         return res
 
     if ml_list:
-        match_ml = process.extractOne(
+        matches_ml = process.extract(
             query=raw_clean,
             choices=ml_list,
             scorer=fuzz.WRatio,
             score_cutoff=82.0,
+            limit=5,
         )
-        if not match_ml:
-            match_ml = process.extractOne(
+        if not matches_ml:
+            matches_ml = process.extract(
                 query=raw_clean,
                 choices=ml_list,
                 scorer=fuzz.token_set_ratio,
                 score_cutoff=82.0,
+                limit=5,
             )
-        if match_ml:
-            res = ml_dict[match_ml[0]]
-            cache_resolver[raw_clean] = res
-            return res
+        if matches_ml:
+            for match_item in matches_ml:
+                candidate_key = match_item[0]
+                if validate_ml_match(raw_clean, candidate_key, generic_words):
+                    res = ml_dict[candidate_key]
+                    cache_resolver[raw_clean] = res
+                    return res
 
     if fb_list:
-        match_fb = process.extractOne(
+        matches_fb = process.extract(
             query=raw_clean,
             choices=list(fb_dict.keys()),
             scorer=fuzz.WRatio,
             score_cutoff=85.0,
+            limit=5,
         )
-        if not match_fb:
-            match_fb = process.extractOne(
+        if not matches_fb:
+            matches_fb = process.extract(
                 query=raw_clean,
                 choices=list(fb_dict.keys()),
                 scorer=fuzz.token_set_ratio,
                 score_cutoff=82.0,
+                limit=5,
             )
-        if match_fb:
-            res = fb_dict[match_fb[0]]
-            cache_resolver[raw_clean] = res
-            return res
+        if matches_fb:
+            for match_item in matches_fb:
+                candidate_key = match_item[0]
+                if validate_ml_match(raw_clean, candidate_key, generic_words):
+                    res = fb_dict[candidate_key]
+                    cache_resolver[raw_clean] = res
+                    return res
 
     res = str(raw_key).strip()
     cache_resolver[raw_clean] = res
@@ -845,7 +910,7 @@ def get_ar_rows_fast(
         if not matches:
             matches = process.extract(
                 query=raw_key_clean,
-                choices=ar_keys,
+                choices=raw_key_clean,
                 scorer=fuzz.token_set_ratio,
                 score_cutoff=85.0,
                 limit=10,
@@ -872,7 +937,6 @@ def run_ar_process():
 
     config = load_config()
     group_keywords, branch_rules = get_custom_rules(config)
-    noo_keywords, generic_words = get_general_config(config)
 
     flag_fraud = config.get("AR", "ar_data_fraud", fallback="No").strip()
     flag_codecus = config.get("AR", "ar_data_codecus", fallback="Ya").strip()
@@ -891,6 +955,7 @@ def run_ar_process():
     flag_giro = config.get("AR", "ar_data_giro", fallback="Ya").strip()
     flag_age = config.get("AR", "ar_data_age", fallback="Ya").strip()
 
+    noo_keywords, _ = get_general_config(config)
     daftar_produk = ["irc", "zn"]
 
     for prod_suffix in daftar_produk:
@@ -927,6 +992,7 @@ def run_ar_process():
             ar_memory,
             minifs_mapping,
             depo_config,
+            generic_words,
         ) = preload_all_data_to_memory(flag_fraud, ar_key_filter, config)
 
         cache_resolver = {}
@@ -1068,6 +1134,7 @@ def run_ar_process():
                 fb_list,
                 cache_resolver,
                 branch_rules,
+                generic_words,
             )
             target_clean = bersihkan_teks(nama_target_resmi)
 
