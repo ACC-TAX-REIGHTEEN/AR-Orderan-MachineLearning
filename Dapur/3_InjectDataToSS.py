@@ -10,7 +10,7 @@ from google.oauth2.service_account import Credentials
 import pandas as pd
 from rapidfuzz import fuzz, process
 import openpyxl
-from openpyxl.styles import Font, Alignment
+from openpyxl.styles import Alignment, Font
 from openpyxl.utils import get_column_letter
 
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -24,13 +24,23 @@ def load_config():
 
 def get_general_config(config):
     noo_keywords = []
+    generic_words = set()
     if config.has_section("GENERAL"):
-        gen_new_cust = config.get("GENERAL", "gen_new_cust", fallback="").strip()
+        gen_new_cust = config.get(
+            "GENERAL", "gen_new_cust", fallback=""
+        ).strip()
         if gen_new_cust:
             noo_keywords = [
                 k.strip().lower() for k in gen_new_cust.split(",") if k.strip()
             ]
-    return noo_keywords
+
+        gen_words = config.get("GENERAL", "generic_words", fallback="").strip()
+        if gen_words:
+            generic_words = {
+                w.strip().lower() for w in gen_words.split(",") if w.strip()
+            }
+
+    return noo_keywords, generic_words
 
 
 def get_custom_rules(config):
@@ -77,6 +87,34 @@ def bersihkan_teks(teks):
     t = str(teks).lower()
     t = re.sub(r"[^\w\s]", " ", t)
     return " ".join(t.split())
+
+
+def validate_ml_match(target_clean, candidate_key, generic_words=None):
+    if generic_words is None:
+        generic_words = set()
+
+    target_tokens = [
+        t
+        for t in bersihkan_teks(target_clean).split()
+        if t not in generic_words and len(t) > 1
+    ]
+    if not target_tokens:
+        target_tokens = [
+            t for t in bersihkan_teks(target_clean).split() if len(t) > 1
+        ]
+
+    candidate_clean = bersihkan_teks(candidate_key)
+    matched_count = sum(
+        1
+        for token in target_tokens
+        if re.search(rf"\b{re.escape(token)}\b", candidate_clean)
+    )
+
+    if len(target_tokens) == 1:
+        return matched_count == 1
+    if len(target_tokens) == 2:
+        return matched_count >= 1
+    return matched_count >= (len(target_tokens) / 2)
 
 
 def format_idr(value):
@@ -170,7 +208,7 @@ def load_minifs_mapping(minifs_file="Minifs_temp.xlsx"):
                 if m_val:
                     min_to_group[m_val].add(m_val)
                 if n_val:
-                    min_to_group[n_val].add(n_val)
+                    min_to_group[m_val].add(n_val)
 
             for m_val, group_set in min_to_group.items():
                 for code_item in group_set:
@@ -242,7 +280,9 @@ def simpan_ar_ke_local_excel(user_ar_rows, nama_pelanggan_resmi, config):
         f"{now.day:02d} {indo_months_short[now.month]} {str(now.year)[-2:]}"
     )
 
-    raw_file_name = f"{nama_pelanggan_resmi}, {nama_kontak}, {nama_penjual} , {tgl_str}"
+    raw_file_name = (
+        f"{nama_pelanggan_resmi}, {nama_kontak}, {nama_penjual} , {tgl_str}"
+    )
     clean_file_name = re.sub(r'[\\/:*?"<>|]', "-", raw_file_name)
     clean_file_name = re.sub(r"\s+", " ", clean_file_name).strip()
 
@@ -298,7 +338,9 @@ def simpan_ar_ke_local_excel(user_ar_rows, nama_pelanggan_resmi, config):
 
         umur_jt = get_val(r, ["Umur JT", "umur jt"])
         c_pelanggan = get_val(
-            r, ["Nama Pelanggan", "nama pelanggan"], default=nama_pelanggan_resmi
+            r,
+            ["Nama Pelanggan", "nama pelanggan"],
+            default=nama_pelanggan_resmi,
         )
         c_penjual = get_val(r, ["Nama Penjual", "nama penjual"])
         c_kontak = get_val(r, ["Nama Kontak", "nama kontak"])
@@ -619,7 +661,12 @@ def get_ar_rows_fast(
     group_keywords,
     minifs_mapping,
     depo_config,
+    ar_key_filter="",
+    generic_words=None,
 ):
+    if generic_words is None:
+        generic_words = set()
+
     cache_key = f"{raw_key_clean}|{target_clean}"
     if cache_key in cache_ar_lookup:
         return cache_ar_lookup[cache_key]
@@ -631,19 +678,29 @@ def get_ar_rows_fast(
             break
 
     if matched_group:
-        g_cache_key = f"GROUP_{matched_group}"
+        g_cache_key = f"GROUP_{matched_group}_{ar_key_filter}_{cache_key}"
         if g_cache_key in cache_ar_lookup:
             return cache_ar_lookup[g_cache_key]
 
         combined_rows = []
         seen_invoices = set()
+        prod_filter_clean = str(ar_key_filter).lower().strip()
+
         for ar_key, rows in ar_memory.items():
             if matched_group in ar_key:
                 for r in rows:
-                    inv_no = str(r.get("No. Faktur", ""))
-                    if inv_no not in seen_invoices:
-                        seen_invoices.add(inv_no)
-                        combined_rows.append(r)
+                    kontak_val = str(r.get("Nama Kontak", "")).lower()
+                    penjual_val = str(r.get("Nama Penjual", "")).lower()
+
+                    if matched_group in kontak_val:
+                        if not prod_filter_clean or (
+                            prod_filter_clean in kontak_val
+                            or prod_filter_clean in penjual_val
+                        ):
+                            inv_no = str(r.get("No. Faktur", ""))
+                            if inv_no not in seen_invoices:
+                                seen_invoices.add(inv_no)
+                                combined_rows.append(r)
 
         cache_ar_lookup[g_cache_key] = combined_rows
         return combined_rows
@@ -688,7 +745,9 @@ def get_ar_rows_fast(
         matched_rows = []
         seen_invoices = set()
 
-        if target_clean in ar_memory:
+        if target_clean in ar_memory and validate_ml_match(
+            target_clean, target_clean, generic_words
+        ):
             for r in ar_memory[target_clean]:
                 inv_no = str(r.get("No. Faktur", ""))
                 if inv_no not in seen_invoices:
@@ -707,6 +766,7 @@ def get_ar_rows_fast(
                     re.search(rf"\b{re.escape(token)}\b", k)
                     for token in target_tokens
                 )
+                and validate_ml_match(target_clean, k, generic_words)
             ]
             if matching_keys:
                 for k in matching_keys:
@@ -737,11 +797,12 @@ def get_ar_rows_fast(
                 )
             if matches:
                 for m in matches:
-                    for r in ar_memory[m[0]]:
-                        inv_no = str(r.get("No. Faktur", ""))
-                        if inv_no not in seen_invoices:
-                            seen_invoices.add(inv_no)
-                            matched_rows.append(r)
+                    if validate_ml_match(target_clean, m[0], generic_words):
+                        for r in ar_memory[m[0]]:
+                            inv_no = str(r.get("No. Faktur", ""))
+                            if inv_no not in seen_invoices:
+                                seen_invoices.add(inv_no)
+                                matched_rows.append(r)
                 if matched_rows:
                     cache_ar_lookup[cache_key] = matched_rows
                     return matched_rows
@@ -811,7 +872,7 @@ def run_ar_process():
 
     config = load_config()
     group_keywords, branch_rules = get_custom_rules(config)
-    noo_keywords = get_general_config(config)
+    noo_keywords, generic_words = get_general_config(config)
 
     flag_fraud = config.get("AR", "ar_data_fraud", fallback="No").strip()
     flag_codecus = config.get("AR", "ar_data_codecus", fallback="Ya").strip()
@@ -1018,6 +1079,8 @@ def run_ar_process():
                 group_keywords,
                 minifs_mapping,
                 depo_config,
+                ar_key_filter,
+                generic_words,
             )
 
             if user_ar_rows:
@@ -1030,7 +1093,9 @@ def run_ar_process():
 
                 user_ar_rows = sorted(user_ar_rows, key=ambil_tanggal_sort)
 
-                simpan_ar_ke_local_excel(user_ar_rows, nama_target_resmi, config)
+                simpan_ar_ke_local_excel(
+                    user_ar_rows, nama_target_resmi, config
+                )
 
             total_sisa_piutang = sum(
                 [
