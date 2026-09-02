@@ -24,23 +24,13 @@ def load_config():
 
 def get_general_config(config):
     noo_keywords = []
-    generic_words = set()
     if config.has_section("GENERAL"):
-        gen_new_cust = config.get(
-            "GENERAL", "gen_new_cust", fallback=""
-        ).strip()
+        gen_new_cust = config.get("GENERAL", "gen_new_cust", fallback="").strip()
         if gen_new_cust:
             noo_keywords = [
                 k.strip().lower() for k in gen_new_cust.split(",") if k.strip()
             ]
-
-        gen_words = config.get("GENERAL", "generic_words", fallback="").strip()
-        if gen_words:
-            generic_words = {
-                w.strip().lower() for w in gen_words.split(",") if w.strip()
-            }
-
-    return noo_keywords, generic_words
+    return noo_keywords
 
 
 def get_custom_rules(config):
@@ -90,7 +80,7 @@ def bersihkan_teks(teks):
 
 
 def extract_dynamic_generic_words(
-    df_ar, col_pelanggan, col_kontak, base_words, threshold_ratio=0.02
+    df_ar, col_pelanggan, col_kontak, df_ml=None, df_fb=None, threshold_ratio=0.015
 ):
     token_counter = Counter()
     unique_texts = set()
@@ -100,9 +90,19 @@ def extract_dynamic_generic_words(
     if col_kontak and col_kontak in df_ar.columns:
         unique_texts.update(df_ar[col_kontak].dropna().astype(str).unique())
 
+    if df_ml is not None:
+        for col in ["Nama Customer dan Kota", "Hasil_Nama_Rekomendasi"]:
+            if col in df_ml.columns:
+                unique_texts.update(df_ml[col].dropna().astype(str).unique())
+
+    if df_fb is not None:
+        for col in ["KETERANGAN", "NAMA"]:
+            if col in df_fb.columns:
+                unique_texts.update(df_fb[col].dropna().astype(str).unique())
+
     total_records = len(unique_texts)
     if total_records == 0:
-        return set(base_words)
+        return set()
 
     for text in unique_texts:
         tokens = set(bersihkan_teks(text).split())
@@ -116,35 +116,38 @@ def extract_dynamic_generic_words(
         if (count / total_records) >= threshold_ratio
     }
 
-    return set(base_words).union(dynamic_detected)
+    return dynamic_detected
 
 
-def validate_ml_match(target_clean, candidate_key, generic_words=None):
-    if generic_words is None:
-        generic_words = set()
+def validate_ml_match(target_clean, candidate_key, dynamic_stopwords=None):
+    if dynamic_stopwords is None:
+        dynamic_stopwords = set()
 
-    target_tokens = [
-        t
-        for t in bersihkan_teks(target_clean).split()
-        if t not in generic_words and len(t) > 1
+    target_tokens = bersihkan_teks(target_clean).split()
+    candidate_tokens = set(bersihkan_teks(candidate_key).split())
+
+    core_tokens = [
+        t for t in target_tokens
+        if t not in dynamic_stopwords and len(t) > 1
     ]
-    if not target_tokens:
-        target_tokens = [
-            t for t in bersihkan_teks(target_clean).split() if len(t) > 1
-        ]
 
-    candidate_clean = bersihkan_teks(candidate_key)
-    matched_count = sum(
-        1
-        for token in target_tokens
-        if re.search(rf"\b{re.escape(token)}\b", candidate_clean)
-    )
+    if not core_tokens:
+        core_tokens = [t for t in target_tokens if len(t) > 1]
 
-    if len(target_tokens) == 1:
-        return matched_count == 1
-    if len(target_tokens) == 2:
-        return matched_count >= 1
-    return matched_count >= (len(target_tokens) / 2)
+    for c_token in core_tokens:
+        has_match = False
+        if c_token in candidate_tokens:
+            has_match = True
+        else:
+            for cand_t in candidate_tokens:
+                if len(c_token) >= 3 and len(cand_t) >= 3:
+                    if cand_t.startswith(c_token) or c_token.startswith(cand_t):
+                        has_match = True
+                        break
+        if not has_match:
+            return False
+
+    return True
 
 
 def format_idr(value):
@@ -177,6 +180,48 @@ def format_excel_date(date_val):
     if isinstance(date_val, datetime) or hasattr(date_val, "strftime"):
         return date_val.strftime("%d %b %Y")
     return str(date_val)
+
+
+def parse_max_jt_date(jt_str):
+    if pd.isna(jt_str) or not str(jt_str).strip():
+        return None
+
+    clean_str = re.sub(r"(?i)jt\s*bg", "", str(jt_str)).strip()
+    if not clean_str:
+        return None
+
+    parsed_dates = []
+    groups = clean_str.split("&")
+
+    for group in groups:
+        group = group.strip()
+        if not group:
+            continue
+
+        parts = group.split("/")
+        if len(parts) == 3:
+            days_str, month_str, year_str = (
+                parts[0].strip(),
+                parts[1].strip(),
+                parts[2].strip(),
+            )
+
+            if len(year_str) == 2:
+                year_str = f"20{year_str}"
+
+            days = [d.strip() for d in days_str.split(",") if d.strip()]
+            for d in days:
+                try:
+                    dt = datetime(
+                        int(year_str), int(month_str), int(d)
+                    ).date()
+                    parsed_dates.append(dt)
+                except ValueError:
+                    continue
+
+    if parsed_dates:
+        return max(parsed_dates)
+    return None
 
 
 def standardize_code(
@@ -238,7 +283,10 @@ def load_minifs_mapping(minifs_file="Minifs_temp.xlsx"):
                 if m_val:
                     min_to_group[m_val].add(m_val)
                 if n_val:
-                    min_to_group[m_val].add(n_val)
+                    if m_val:
+                        min_to_group[m_val].add(n_val)
+                    else:
+                        min_to_group[n_val].add(n_val)
 
             for m_val, group_set in min_to_group.items():
                 for code_item in group_set:
@@ -425,18 +473,18 @@ def preload_all_data_to_memory(flag_fraud, ar_key_filter, config):
         fallback="SL|YY|MKS|MGL|PW|PWT|PLU|SG|SMG|TGL|PA|KDI",
     ).strip()
     minifs_mapping = load_minifs_mapping("Minifs_temp.xlsx")
-    _, base_generic_words = get_general_config(config)
 
+    df_ml_temp = None
     ml_dict = {}
     ml_list = []
     if os.path.exists("Hasil_Latihan_temp.xlsx"):
-        df_ml = pd.read_excel("Hasil_Latihan_temp.xlsx")
-        df_ml.columns = df_ml.columns.str.strip()
+        df_ml_temp = pd.read_excel("Hasil_Latihan_temp.xlsx")
+        df_ml_temp.columns = df_ml_temp.columns.str.strip()
         if (
-            "Nama Customer dan Kota" in df_ml.columns
-            and "Hasil_Nama_Rekomendasi" in df_ml.columns
+            "Nama Customer dan Kota" in df_ml_temp.columns
+            and "Hasil_Nama_Rekomendasi" in df_ml_temp.columns
         ):
-            for _, r in df_ml.iterrows():
+            for _, r in df_ml_temp.iterrows():
                 k = bersihkan_teks(r["Nama Customer dan Kota"])
                 v = str(r["Hasil_Nama_Rekomendasi"]).strip()
                 if (
@@ -449,19 +497,20 @@ def preload_all_data_to_memory(flag_fraud, ar_key_filter, config):
                     if k not in ml_list:
                         ml_list.append(k)
 
+    df_fb_temp = None
     fb_dict = {}
     fb_list = []
     if os.path.exists("FBackCust_temp.xlsx"):
-        df_fb = pd.read_excel("FBackCust_temp.xlsx")
-        df_fb.columns = df_fb.columns.str.strip()
+        df_fb_temp = pd.read_excel("FBackCust_temp.xlsx")
+        df_fb_temp.columns = df_fb_temp.columns.str.strip()
 
-        if "NO." in df_fb.columns:
-            df_fb["NO."] = pd.to_numeric(df_fb["NO."], errors="coerce")
-            df_fb = df_fb.sort_values(by="NO.", ascending=True)
-            df_fb = df_fb.drop_duplicates(subset=["KETERANGAN"], keep="last")
+        if "NO." in df_fb_temp.columns:
+            df_fb_temp["NO."] = pd.to_numeric(df_fb_temp["NO."], errors="coerce")
+            df_fb_temp = df_fb_temp.sort_values(by="NO.", ascending=True)
+            df_fb_temp = df_fb_temp.drop_duplicates(subset=["KETERANGAN"], keep="last")
 
-        if "KETERANGAN" in df_fb.columns and "NAMA" in df_fb.columns:
-            for _, row in df_fb.iterrows():
+        if "KETERANGAN" in df_fb_temp.columns and "NAMA" in df_fb_temp.columns:
+            for _, row in df_fb_temp.iterrows():
                 ket = bersihkan_teks(row["KETERANGAN"])
                 nama = str(row["NAMA"]).strip()
                 if ket and nama:
@@ -469,7 +518,7 @@ def preload_all_data_to_memory(flag_fraud, ar_key_filter, config):
                     fb_list.append(ket)
 
     ar_memory = defaultdict(list)
-    dynamic_generic_words = set(base_generic_words)
+    dynamic_stopwords = set()
 
     if os.path.exists("ARClean_temp.xlsx"):
         df_ar = read_excel_auto_header(
@@ -484,12 +533,13 @@ def preload_all_data_to_memory(flag_fraud, ar_key_filter, config):
             "kode pelanggan"
         )
 
-        dynamic_generic_words = extract_dynamic_generic_words(
+        dynamic_stopwords = extract_dynamic_generic_words(
             df_ar=df_ar,
             col_pelanggan=col_pelanggan,
             col_kontak=col_kontak,
-            base_words=base_generic_words,
-            threshold_ratio=0.02,
+            df_ml=df_ml_temp,
+            df_fb=df_fb_temp,
+            threshold_ratio=0.015,
         )
 
         if col_penjual:
@@ -606,7 +656,7 @@ def preload_all_data_to_memory(flag_fraud, ar_key_filter, config):
                         ar_memory[f"CODE_{std_c.lower()}"].append(r_dict)
 
     print(
-        f"--> [AUTO-STOPWORDS] Terdeteksi {len(dynamic_generic_words)} kata generik/wilayah secara otomatis."
+        f"--> [DYNAMIC STOPWORDS] Terdeteksi {len(dynamic_stopwords)} kata generik/wilayah secara otomatis dari korpus data."
     )
     print("--> RAM PRELOAD SELESAI Data terfilter presisi!\n")
     return (
@@ -617,7 +667,7 @@ def preload_all_data_to_memory(flag_fraud, ar_key_filter, config):
         ar_memory,
         minifs_mapping,
         depo_config,
-        dynamic_generic_words,
+        dynamic_stopwords,
     )
 
 
@@ -629,10 +679,10 @@ def resolve_target_name_fast(
     fb_list,
     cache_resolver,
     branch_rules,
-    generic_words=None,
+    dynamic_stopwords=None,
 ):
-    if generic_words is None:
-        generic_words = set()
+    if dynamic_stopwords is None:
+        dynamic_stopwords = set()
 
     raw_clean = bersihkan_teks(raw_key)
     if not raw_clean:
@@ -669,22 +719,22 @@ def resolve_target_name_fast(
         matches_ml = process.extract(
             query=raw_clean,
             choices=ml_list,
-            scorer=fuzz.WRatio,
-            score_cutoff=82.0,
-            limit=5,
+            scorer=fuzz.token_set_ratio,
+            score_cutoff=65.0,
+            limit=10,
         )
         if not matches_ml:
             matches_ml = process.extract(
                 query=raw_clean,
                 choices=ml_list,
-                scorer=fuzz.token_set_ratio,
-                score_cutoff=82.0,
-                limit=5,
+                scorer=fuzz.WRatio,
+                score_cutoff=65.0,
+                limit=10,
             )
         if matches_ml:
             for match_item in matches_ml:
                 candidate_key = match_item[0]
-                if validate_ml_match(raw_clean, candidate_key, generic_words):
+                if validate_ml_match(raw_clean, candidate_key, dynamic_stopwords):
                     res = ml_dict[candidate_key]
                     cache_resolver[raw_clean] = res
                     return res
@@ -693,22 +743,22 @@ def resolve_target_name_fast(
         matches_fb = process.extract(
             query=raw_clean,
             choices=list(fb_dict.keys()),
-            scorer=fuzz.WRatio,
-            score_cutoff=85.0,
-            limit=5,
+            scorer=fuzz.token_set_ratio,
+            score_cutoff=65.0,
+            limit=10,
         )
         if not matches_fb:
             matches_fb = process.extract(
                 query=raw_clean,
                 choices=list(fb_dict.keys()),
-                scorer=fuzz.token_set_ratio,
-                score_cutoff=82.0,
-                limit=5,
+                scorer=fuzz.WRatio,
+                score_cutoff=65.0,
+                limit=10,
             )
         if matches_fb:
             for match_item in matches_fb:
                 candidate_key = match_item[0]
-                if validate_ml_match(raw_clean, candidate_key, generic_words):
+                if validate_ml_match(raw_clean, candidate_key, dynamic_stopwords):
                     res = fb_dict[candidate_key]
                     cache_resolver[raw_clean] = res
                     return res
@@ -727,10 +777,10 @@ def get_ar_rows_fast(
     minifs_mapping,
     depo_config,
     ar_key_filter="",
-    generic_words=None,
+    dynamic_stopwords=None,
 ):
-    if generic_words is None:
-        generic_words = set()
+    if dynamic_stopwords is None:
+        dynamic_stopwords = set()
 
     cache_key = f"{raw_key_clean}|{target_clean}"
     if cache_key in cache_ar_lookup:
@@ -811,7 +861,7 @@ def get_ar_rows_fast(
         seen_invoices = set()
 
         if target_clean in ar_memory and validate_ml_match(
-            target_clean, target_clean, generic_words
+            target_clean, target_clean, dynamic_stopwords
         ):
             for r in ar_memory[target_clean]:
                 inv_no = str(r.get("No. Faktur", ""))
@@ -831,7 +881,7 @@ def get_ar_rows_fast(
                     re.search(rf"\b{re.escape(token)}\b", k)
                     for token in target_tokens
                 )
-                and validate_ml_match(target_clean, k, generic_words)
+                and validate_ml_match(target_clean, k, dynamic_stopwords)
             ]
             if matching_keys:
                 for k in matching_keys:
@@ -862,7 +912,7 @@ def get_ar_rows_fast(
                 )
             if matches:
                 for m in matches:
-                    if validate_ml_match(target_clean, m[0], generic_words):
+                    if validate_ml_match(target_clean, m[0], dynamic_stopwords):
                         for r in ar_memory[m[0]]:
                             inv_no = str(r.get("No. Faktur", ""))
                             if inv_no not in seen_invoices:
@@ -887,6 +937,7 @@ def get_ar_rows_fast(
                 re.search(rf"\b{re.escape(token)}\b", k)
                 for token in query_tokens
             )
+            and validate_ml_match(raw_key_clean, k, dynamic_stopwords)
         ]
         if matching_keys:
             for k in matching_keys:
@@ -910,18 +961,19 @@ def get_ar_rows_fast(
         if not matches:
             matches = process.extract(
                 query=raw_key_clean,
-                choices=raw_key_clean,
+                choices=ar_keys,
                 scorer=fuzz.token_set_ratio,
                 score_cutoff=85.0,
                 limit=10,
             )
         if matches:
             for m in matches:
-                for r in ar_memory[m[0]]:
-                    inv_no = str(r.get("No. Faktur", ""))
-                    if inv_no not in seen_invoices:
-                        seen_invoices.add(inv_no)
-                        matched_rows.append(r)
+                if validate_ml_match(raw_key_clean, m[0], dynamic_stopwords):
+                    for r in ar_memory[m[0]]:
+                        inv_no = str(r.get("No. Faktur", ""))
+                        if inv_no not in seen_invoices:
+                            seen_invoices.add(inv_no)
+                            matched_rows.append(r)
             if matched_rows:
                 cache_ar_lookup[cache_key] = matched_rows
                 return matched_rows
@@ -955,7 +1007,7 @@ def run_ar_process():
     flag_giro = config.get("AR", "ar_data_giro", fallback="Ya").strip()
     flag_age = config.get("AR", "ar_data_age", fallback="Ya").strip()
 
-    noo_keywords, _ = get_general_config(config)
+    noo_keywords = get_general_config(config)
     daftar_produk = ["irc", "zn"]
 
     for prod_suffix in daftar_produk:
@@ -992,7 +1044,7 @@ def run_ar_process():
             ar_memory,
             minifs_mapping,
             depo_config,
-            generic_words,
+            dynamic_stopwords,
         ) = preload_all_data_to_memory(flag_fraud, ar_key_filter, config)
 
         cache_resolver = {}
@@ -1134,7 +1186,7 @@ def run_ar_process():
                 fb_list,
                 cache_resolver,
                 branch_rules,
-                generic_words,
+                dynamic_stopwords,
             )
             target_clean = bersihkan_teks(nama_target_resmi)
 
@@ -1147,7 +1199,7 @@ def run_ar_process():
                 minifs_mapping,
                 depo_config,
                 ar_key_filter,
-                generic_words,
+                dynamic_stopwords,
             )
 
             if user_ar_rows:
@@ -1293,25 +1345,42 @@ def run_ar_process():
                         except (ValueError, TypeError):
                             pass
 
-                    if flag_age == "Ya" and pd.notna(inv_row.get("Tgl Faktur")):
-                        try:
-                            tgl_val = str(inv_row["Tgl Faktur"]).lower()
-                            for indo, eng in indo_months.items():
-                                if indo in tgl_val:
-                                    tgl_val = tgl_val.replace(indo, eng)
-                                    break
+                    if flag_age == "Ya":
+                        target_dt = None
+                        tgl_faktur_dt_val = None
 
-                            tgl_faktur_dt = pd.to_datetime(
-                                tgl_val, errors="coerce", format="mixed"
+                        if pd.notna(inv_row.get("Tgl Faktur")):
+                            try:
+                                tgl_val = str(inv_row["Tgl Faktur"]).lower()
+                                for indo, eng in indo_months.items():
+                                    if indo in tgl_val:
+                                        tgl_val = tgl_val.replace(indo, eng)
+                                        break
+
+                                parsed_tf = pd.to_datetime(
+                                    tgl_val, errors="coerce", format="mixed"
+                                )
+                                if pd.notna(parsed_tf):
+                                    tgl_faktur_dt_val = parsed_tf.date()
+                            except Exception:
+                                tgl_faktur_dt_val = None
+
+                        if (
+                            flag_giro == "Ya"
+                            and "Tanggal JT" in inv_row
+                            and pd.notna(inv_row.get("Tanggal JT"))
+                        ):
+                            target_dt = parse_max_jt_date(
+                                inv_row.get("Tanggal JT")
                             )
-                            if pd.notna(tgl_faktur_dt):
-                                selisih_hari = (
-                                    current_date - tgl_faktur_dt.date()
-                                ).days
-                                inv_part.append(f"{selisih_hari}\tHR")
-                            else:
-                                inv_part.append("-\tHR")
-                        except Exception:
+
+                        if target_dt is not None and tgl_faktur_dt_val is not None:
+                            selisih_hari = abs((target_dt - tgl_faktur_dt_val).days)
+                            inv_part.append(f"{selisih_hari}\tHR")
+                        elif target_dt is None and tgl_faktur_dt_val is not None:
+                            selisih_hari = abs((current_date - tgl_faktur_dt_val).days)
+                            inv_part.append(f"{selisih_hari}\tHR")
+                        else:
                             inv_part.append("-\tHR")
 
                     line_str = "\t".join(
@@ -1373,7 +1442,7 @@ def run_ar_process():
                 chunk = requests[i : i + BATCH_SIZE]
                 ss.batch_update({"requests": chunk})
                 print(
-                    f"--> Mengunggah {len(chunk)} baris ({i + len(chunk)}/{len(requests)}) ke Google Sheets {prod_suffix.upper()}..."
+                    f"--> Mengunggah {len(chunk)} baris ke Google Sheets {prod_suffix.upper()}..."
                 )
 
             print(
