@@ -123,28 +123,44 @@ def validate_ml_match(target_clean, candidate_key, dynamic_stopwords=None):
     if dynamic_stopwords is None:
         dynamic_stopwords = set()
 
-    target_tokens = bersihkan_teks(target_clean).split()
+    target_tokens = set(bersihkan_teks(target_clean).split())
     candidate_tokens = set(bersihkan_teks(candidate_key).split())
 
-    core_tokens = [
+    target_core = [
         t for t in target_tokens
         if t not in dynamic_stopwords and len(t) > 1
     ]
+    if not target_core:
+        target_core = [t for t in target_tokens if len(t) > 1]
 
-    if not core_tokens:
-        core_tokens = [t for t in target_tokens if len(t) > 1]
-
-    for c_token in core_tokens:
+    for t_token in target_core:
         has_match = False
-        if c_token in candidate_tokens:
+        if t_token in candidate_tokens:
             has_match = True
         else:
             for cand_t in candidate_tokens:
-                if len(c_token) >= 3 and len(cand_t) >= 3:
-                    if cand_t.startswith(c_token) or c_token.startswith(cand_t):
+                if len(t_token) >= 3 and len(cand_t) >= 3:
+                    if cand_t.startswith(t_token) or t_token.startswith(cand_t):
                         has_match = True
                         break
         if not has_match:
+            return False
+
+    candidate_core = [
+        c for c in candidate_tokens
+        if c not in dynamic_stopwords and len(c) > 1
+    ]
+    for c_token in candidate_core:
+        has_cov = False
+        if c_token in target_tokens:
+            has_cov = True
+        else:
+            for t_tok in target_tokens:
+                if len(c_token) >= 3 and len(t_tok) >= 3:
+                    if c_token.startswith(t_tok) or t_tok.startswith(c_token):
+                        has_cov = True
+                        break
+        if not has_cov:
             return False
 
     return True
@@ -853,6 +869,14 @@ def get_ar_rows_fast(
         cache_ar_lookup[cache_key] = combined_code_rows
         return combined_code_rows
 
+    if target_clean in ar_memory:
+        cache_ar_lookup[cache_key] = ar_memory[target_clean]
+        return ar_memory[target_clean]
+
+    if raw_key_clean in ar_memory:
+        cache_ar_lookup[cache_key] = ar_memory[raw_key_clean]
+        return ar_memory[raw_key_clean]
+
     ar_keys = [k for k in ar_memory.keys() if not k.startswith("CODE_")]
     is_ml_mapped = bool(target_clean and target_clean != raw_key_clean)
 
@@ -1250,7 +1274,7 @@ def run_ar_process():
                 )
             if flag_inv_val == "Ya":
                 note_lines.append(
-                    f"Total Faktur Aktif (Inv) :  {len(user_ar_rows)} "
+                    f"Total Faktur Aktif (Inv)\t :  {len(user_ar_rows)} "
                 )
 
             note_lines.append("")
