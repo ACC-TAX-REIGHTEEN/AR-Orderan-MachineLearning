@@ -3,6 +3,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 import os
 import re
+import socket
 import time
 import warnings
 import gspread
@@ -14,6 +15,8 @@ from openpyxl.styles import Alignment, Font
 from openpyxl.utils import get_column_letter
 
 warnings.filterwarnings("ignore", category=UserWarning)
+
+socket.setdefaulttimeout(60)
 
 
 def load_config():
@@ -1087,13 +1090,13 @@ def run_ar_process():
             ss = client.open_by_url(ar_url)
             wks = ss.worksheet(ar_sheet_name)
             sheet_id = wks.id
+            all_rows = wks.get_all_values()
         except Exception as e_conn:
             print(
-                f"--> Gagal membuka Google Sheet {prod_suffix.upper()}: {e_conn}"
+                f"--> [ERROR KONEKSI] Gagal membuka/membaca Google Sheet {prod_suffix.upper()}: {e_conn}"
             )
             continue
 
-        all_rows = wks.get_all_values()
         if not all_rows:
             print(f"--> Sheet '{ar_sheet_name}' kosong.")
             continue
@@ -1161,7 +1164,7 @@ def run_ar_process():
                     "RINGKASAN PERFORMA PIUTANG",
                     "========================================",
                     "Piutang\t\t\t\t\t :  0",
-                    "Total Faktur Aktif (Inv) :  0",
+                    "Total Faktur Aktif (Inv)\t :  0",
                     "",
                     "========================================",
                     "DAFTAR RINCIAN FAKTUR AKTIF",
@@ -1464,10 +1467,16 @@ def run_ar_process():
             BATCH_SIZE = 300
             for i in range(0, len(requests), BATCH_SIZE):
                 chunk = requests[i : i + BATCH_SIZE]
-                ss.batch_update({"requests": chunk})
-                print(
-                    f"--> Mengunggah {len(chunk)} baris ke Google Sheets {prod_suffix.upper()}..."
-                )
+                try:
+                    ss.batch_update({"requests": chunk})
+                    print(
+                        f"--> Mengunggah {len(chunk)} baris ke Google Sheets {prod_suffix.upper()}..."
+                    )
+                except Exception as e_upload:
+                    print(
+                        f"--> [ERROR UPLOAD] Gagal mengunggah batch ke Google Sheets: {e_upload}"
+                    )
+                    break
 
             print(
                 f"--> Total {total_diisi} baris data kosong untuk {prod_suffix.upper()} berhasil diperbarui!"
