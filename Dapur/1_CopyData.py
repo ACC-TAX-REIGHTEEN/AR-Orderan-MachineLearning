@@ -41,23 +41,23 @@ def process_arvi_source(excel_path, sheet_name, output_file="ARClean_temp.xlsx")
     df_clean.columns = df_raw.iloc[header_idx].astype(str).str.strip()
     df_clean = df_clean.dropna(how="all", axis=1).reset_index(drop=True)
     df_clean.to_excel(output_file, index=False)
-    print(f"--> Sheet '{sheet_name}' berhasil diekstrak & dibersihkan ke '{output_file}'!\n")
+    print(f"--> Sheet '{sheet_name}' berhasil diekstrak & dibersihkan ke '{output_file}'!")
 
 
 def process_arvi_feedback(excel_path, sheet_name, output_file="FBackCust_temp.xlsx"):
     print(f"--> Memproses sheet '{sheet_name}' dari '{excel_path}' -> '{output_file}'...")
     df_clean = pd.read_excel(excel_path, sheet_name=sheet_name, skiprows=1)
     df_clean.to_excel(output_file, index=False)
-    print(f"--> Sheet '{sheet_name}' berhasil diekstrak ke '{output_file}'!\n")
+    print(f"--> Sheet '{sheet_name}' berhasil diekstrak ke '{output_file}'!")
 
 
 def copy_ml_file(src_path, dest_file="Hasil_Latihan_temp.xlsx"):
     print(f"--> Menyalin file Machine Learning dari '{src_path}' -> '{dest_file}'...")
     if not os.path.exists(src_path):
-        print(f"--> File sumber ML tidak ditemukan pada path: '{src_path}'\n")
+        print(f"--> File sumber ML tidak ditemukan pada path: '{src_path}'")
         return False
     shutil.copyfile(src_path, dest_file)
-    print(f"--> File ML berhasil disalin ke '{dest_file}' di folder kerja!\n")
+    print(f"--> File ML berhasil disalin ke '{dest_file}' di folder kerja!")
     return True
 
 
@@ -88,9 +88,9 @@ def run_preparation():
                 output_file="ARClean_temp.xlsx",
             )
         else:
-            print(f"--> File ARVIEWER tidak ditemukan pada path: {arvi_path}\n")
+            print(f"--> File ARVIEWER tidak ditemukan pada path: {arvi_path}")
     else:
-        print("--> Parameter 'arvi' atau 'arvi_ar_sheet' tidak diisi.\n")
+        print("--> Parameter 'arvi' atau 'arvi_ar_sheet' tidak diisi.")
 
     if arvi_path and arvi_name_out:
         if os.path.exists(arvi_path):
@@ -100,14 +100,14 @@ def run_preparation():
                 output_file="FBackCust_temp.xlsx",
             )
         else:
-            print(f"--> File ARVIEWER tidak ditemukan pada path: {arvi_path}\n")
+            print(f"--> File ARVIEWER tidak ditemukan pada path: {arvi_path}")
     else:
-        print("--> Parameter 'arvi' atau 'arvi_name_out' tidak diisi.\n")
+        print("--> Parameter 'arvi' atau 'arvi_name_out' tidak diisi.")
 
     if ml_training_path:
         copy_ml_file(src_path=ml_training_path, dest_file="Hasil_Latihan_temp.xlsx")
     else:
-        print("--> Parameter 'ml_trainning' tidak diisi.\n")
+        print("--> Parameter 'ml_trainning' tidak diisi.")
 
     print("--> Proses selesai!")
 

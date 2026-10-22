@@ -677,7 +677,7 @@ def preload_all_data_to_memory(flag_fraud, ar_key_filter, config):
     print(
         f"--> [DYNAMIC STOPWORDS] Terdeteksi {len(dynamic_stopwords)} kata generik/wilayah secara otomatis dari korpus data."
     )
-    print("--> RAM PRELOAD SELESAI Data terfilter presisi!\n")
+    print("--> RAM PRELOAD SELESAI Data terfilter presisi!")
     return (
         ml_dict,
         ml_list,
@@ -1171,7 +1171,7 @@ def run_ar_process():
                     "========================================",
                     "Outlet Baru (NOO)",
                 ]
-                final_note_text = "\n".join(note_lines)
+                final_note_text = "".join(note_lines)
 
                 req_item = {
                     "updateCells": {
@@ -1432,7 +1432,7 @@ def run_ar_process():
 
                     note_lines.append(line_str)
 
-            final_note_text = "\n".join(note_lines)
+            final_note_text = "".join(note_lines)
 
             req_item = {
                 "updateCells": {
