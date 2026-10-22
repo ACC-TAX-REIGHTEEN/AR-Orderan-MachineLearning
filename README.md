@@ -618,7 +618,7 @@ Periksa `Dapur/credentials.json` — pastikan `private_key` tersalin lengkap den
 
 ## 📜 Lisensi
 
-Proyek ini dikembangkan untuk keperluan internal internal perusahaan. Silakan sesuaikan dengan kebutuhan organisasi Anda.
+Proyek ini dikembangkan untuk keperluan internal perusahaan. Silakan sesuaikan dengan kebutuhan organisasi Anda.
 
 ---
 
