@@ -1171,7 +1171,7 @@ def run_ar_process():
                     "========================================",
                     "Outlet Baru (NOO)",
                 ]
-                final_note_text = "".join(note_lines)
+                final_note_text = "\n".join(note_lines)
 
                 req_item = {
                     "updateCells": {
@@ -1432,7 +1432,7 @@ def run_ar_process():
 
                     note_lines.append(line_str)
 
-            final_note_text = "".join(note_lines)
+            final_note_text = "\n".join(note_lines)
 
             req_item = {
                 "updateCells": {
