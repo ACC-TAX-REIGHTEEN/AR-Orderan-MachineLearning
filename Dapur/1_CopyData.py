@@ -33,21 +33,28 @@ def auto_detect_header_row(df_raw):
     return 0
 
 
+def read_excel_auto(excel_path, **kwargs):
+    try:
+        return pd.read_excel(excel_path, engine="calamine", **kwargs)
+    except Exception:
+        return pd.read_excel(excel_path, engine="openpyxl", **kwargs)
+
+
 def process_arvi_source(excel_path, sheet_name, output_file="ARClean_temp.xlsx"):
     print(f"--> Memproses sheet '{sheet_name}' dari '{excel_path}' -> '{output_file}'...")
-    df_raw = pd.read_excel(excel_path, sheet_name=sheet_name, header=None)
+    df_raw = read_excel_auto(excel_path, sheet_name=sheet_name, header=None)
     header_idx = auto_detect_header_row(df_raw)
     df_clean = df_raw.iloc[header_idx + 1 :].copy()
     df_clean.columns = df_raw.iloc[header_idx].astype(str).str.strip()
     df_clean = df_clean.dropna(how="all", axis=1).reset_index(drop=True)
-    df_clean.to_excel(output_file, index=False)
+    df_clean.to_excel(output_file, index=False, engine="openpyxl")
     print(f"--> Sheet '{sheet_name}' berhasil diekstrak & dibersihkan ke '{output_file}'!")
 
 
 def process_arvi_feedback(excel_path, sheet_name, output_file="FBackCust_temp.xlsx"):
     print(f"--> Memproses sheet '{sheet_name}' dari '{excel_path}' -> '{output_file}'...")
-    df_clean = pd.read_excel(excel_path, sheet_name=sheet_name, skiprows=1)
-    df_clean.to_excel(output_file, index=False)
+    df_clean = read_excel_auto(excel_path, sheet_name=sheet_name, skiprows=1)
+    df_clean.to_excel(output_file, index=False, engine="openpyxl")
     print(f"--> Sheet '{sheet_name}' berhasil diekstrak ke '{output_file}'!")
 
 
@@ -110,6 +117,7 @@ def run_preparation():
         print("--> Parameter 'ml_trainning' tidak diisi.")
 
     print("--> Proses selesai!")
+
 
 if __name__ == "__main__":
     run_preparation()
