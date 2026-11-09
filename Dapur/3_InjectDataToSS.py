@@ -19,6 +19,15 @@ warnings.filterwarnings("ignore", category=UserWarning)
 socket.setdefaulttimeout(60)
 
 
+def read_excel_safe(file_path, **kwargs):
+    try:
+        return pd.read_excel(file_path, engine="calamine", **kwargs)
+    except (ImportError, ValueError):
+        if str(file_path).lower().endswith(".xlsx"):
+            return pd.read_excel(file_path, engine="openpyxl", **kwargs)
+        return pd.read_excel(file_path, **kwargs)
+
+
 def load_config():
     config = configparser.ConfigParser()
     config.read("config.conf")
@@ -264,7 +273,7 @@ def load_minifs_mapping(minifs_file="Minifs_temp.xlsx"):
         return code_to_all_codes
 
     try:
-        df_m = pd.read_excel(minifs_file)
+        df_m = read_excel_safe(minifs_file)
         df_m.columns = df_m.columns.str.strip()
 
         col_min = [
@@ -318,7 +327,7 @@ def load_minifs_mapping(minifs_file="Minifs_temp.xlsx"):
 
 
 def read_excel_auto_header(file_path, sheet_name=0, target_column=""):
-    df_raw = pd.read_excel(file_path, sheet_name=sheet_name, header=None)
+    df_raw = read_excel_safe(file_path, sheet_name=sheet_name, header=None)
     target_clean = str(target_column).strip().upper()
 
     for idx, row in df_raw.iterrows():
@@ -497,7 +506,7 @@ def preload_all_data_to_memory(flag_fraud, ar_key_filter, config):
     ml_dict = {}
     ml_list = []
     if os.path.exists("Hasil_Latihan_temp.xlsx"):
-        df_ml_temp = pd.read_excel("Hasil_Latihan_temp.xlsx")
+        df_ml_temp = read_excel_safe("Hasil_Latihan_temp.xlsx")
         df_ml_temp.columns = df_ml_temp.columns.str.strip()
         if (
             "Nama Customer dan Kota" in df_ml_temp.columns
@@ -520,7 +529,7 @@ def preload_all_data_to_memory(flag_fraud, ar_key_filter, config):
     fb_dict = {}
     fb_list = []
     if os.path.exists("FBackCust_temp.xlsx"):
-        df_fb_temp = pd.read_excel("FBackCust_temp.xlsx")
+        df_fb_temp = read_excel_safe("FBackCust_temp.xlsx")
         df_fb_temp.columns = df_fb_temp.columns.str.strip()
 
         if "NO." in df_fb_temp.columns:
