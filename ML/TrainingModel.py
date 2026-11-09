@@ -31,8 +31,8 @@ def bersihkan_teks_input(teks):
 def proses_pencocokan_hybrid(
     file_input="TheTrainningData.xlsx",
     file_output="Hasil_Latihan_temp.xlsx",
-    batas_minimal_fuzzy=75.0,  # Batas skor minimal RapidFuzz (0 - 100)
-    batas_minimal_ml=0.65       # Batas skor minimal ML Cosine Similarity (0.0 - 1.0)
+    batas_minimal_fuzzy=75.0,
+    batas_minimal_ml=0.65
 ):
     print(f"--> Membaca file input: '{file_input}' ...")
 
@@ -40,7 +40,11 @@ def proses_pencocokan_hybrid(
         print(f"--> [ERROR] File '{file_input}' tidak ditemukan.")
         return
 
-    df = pd.read_excel(file_input)
+    try:
+        df = pd.read_excel(file_input, engine="calamine")
+    except Exception:
+        df = pd.read_excel(file_input, engine="openpyxl")
+
     df.columns = df.columns.str.strip()
 
     col_input = "Nama Customer dan Kota"
@@ -76,10 +80,10 @@ def proses_pencocokan_hybrid(
 
     print(f"--> Melatih Model Machine Learning & Kamus Memori ({len(data_input_clean)} data)...")
 
-    vectorizer = TfidfVectorizer(analyzer='char_wb', ngram_range=(2, 4))
+    vectorizer = TfidfVectorizer(analyzer="char_wb", ngram_range=(2, 4))
     X_train = vectorizer.fit_transform(data_input_clean)
 
-    model_nn = NearestNeighbors(n_neighbors=1, metric='cosine')
+    model_nn = NearestNeighbors(n_neighbors=1, metric="cosine")
     model_nn.fit(X_train)
 
     print("--> Pelatihan selesai! Memproses pencocokan Hybrid bertingkat...")
@@ -150,7 +154,7 @@ def proses_pencocokan_hybrid(
 
                 jarak_cosine = distances[0][0]
                 idx_terdekat = indices[0][0]
-                
+
                 kemiripan_ml = 1.0 - jarak_cosine
                 skor_ml_persen = round(kemiripan_ml * 100, 2)
 
@@ -176,7 +180,7 @@ def proses_pencocokan_hybrid(
     df["Status_Pencocokan"] = hasil_status
     df["Sumber_Pencocokan"] = hasil_sumber
 
-    df.to_excel(file_output, index=False)
+    df.to_excel(file_output, index=False, engine="openpyxl")
     print("--> Pemrosesan selesai!")
     print(f"--> File hasil disimpan ke: '{file_output}'")
 
